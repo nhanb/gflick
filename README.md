@@ -1,22 +1,44 @@
-# Boring, simple threaded server
+# What
+
+Gflick lets me play video files straight from my Google Drive without
+downloading the whole thing ahead of time.
+Subtitles/audio tracks and seek work out of the box.
+
+- [Demo here](https://junk.imnhan.com/gflick.mp4)
+- [Youtube mirror](https://youtu.be/MzHS8l6-61I)
+
+# How?
+
+It's basically an http proxy that does Google Drive authentication behind the
+scene, exposing a plain old http endpoint that I can feed into off-the-shelf
+video players.
+Seeking and text/audio tracks work because the server supports [the `Range`
+header](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Range).
+
+# Running it
+
+This is a very quick and dirty implementation that's full of duplicate code and
+is built upon the standard library's non-production-ready httpserver. But hey
+if you put it behind basic-auth'd nginx it's probably fine for personal use.
+Maybe.
+
+The only dependency is `requests`, which is probably available as a proper OS
+package on most linux distros.
+
+You need to first create an oauth client from console.developers.google.com,
+then:
 
 ```sh
-pip install requests
+python google.py
+# Follow the script's instructions to authorize your newly created client.
+# Once that's done, tokens.json will be created, which will be used by server.py.
 echo server.py | entr -r python server.py
-# http://localhost:8000/v/<gdrive_file_id>
+# Visit http://localhost:8000
 ```
 
-# Shiny (read: weird) async server
+# Running on a publicly accessible server
 
-```sh
-pip install starlette aiohttp uvicorn
-uvicorn asyncserver:app --reload
-# http://localhost:8000/v/<gdrive_file_id>
-```
-
-# Quick run list
-
-Mostly for my personal use. TL;DR:
+This is a draft mostly for my personal use, but it may give you ideas. TL;DR:
 
 - create non-root user
 - create systemd service
@@ -24,9 +46,15 @@ Mostly for my personal use. TL;DR:
   + letsencrypt
   + basic auth
 
+The whole thing can be converted into an ansible playbook (and it should be).
+I'm just too lazy atm.
+
 ```sh
 apt install python3.7
 adduser --disabled-password gflick
+chmod 0750 /home/gflick
+chown gflick:www-data /home/gflick
+chown gflick:www-data /home/gflick/.htpasswd
 su gflick
 cd
 git clone https://github.com/nhanb/gflick.git
@@ -60,7 +88,7 @@ mkdir -p /var/www/letsencrypt
 # this will create cert files in /etc/letsencrypt/ - see nginx config.
 certbot certonly \
   --webroot --webroot-path /var/www/letsencrypt \
-  --email caophim@imnhan.com \
+  --email gflick@imnhan.com \
   -d v.imnhan.com
 # Now that we have the cert files in place, serve the full site
 ln -s -f /etc/nginx/sites-available/gflick /etc/nginx/sites-enabled/gflick
