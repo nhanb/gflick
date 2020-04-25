@@ -13,6 +13,8 @@ Helper script to quickly get user consent for GDrive API access.
 Simply run `python google.py` and follow instructions.
 """
 
+TOKENS_FILE = "tokens.json"
+
 CLIENT_ID = os.environ.get("CLIENT_ID") or input("CLIENT_ID: ").strip()
 CLIENT_SECRET = os.environ.get("CLIENT_SECRET") or input("CLIENT_SECRET: ").strip()
 
@@ -24,9 +26,12 @@ def main():
     webbrowser.open_new_tab(oauth_url)
     authorization_code = next(handler)
     tokens = get_initial_tokens(authorization_code, redirect_port)
-    print("authorization_code:", authorization_code)
-    print("tokens:")
-    print(json.dumps(tokens, indent=2, sort_keys=True))
+    tokens["authorization_code"] = authorization_code
+    tokens["client_id"] = CLIENT_ID
+    tokens["client_secret"] = CLIENT_SECRET
+    with open(TOKENS_FILE, "w") as tfile:
+        tfile.write(json.dumps(tokens, indent=2, sort_keys=True))
+    print(f"Results written to {TOKENS_FILE}")
 
 
 def wait_for_authorization_code():
@@ -105,7 +110,6 @@ def get_initial_tokens(authorization_code, redirect_port):
     return {
         "refresh_token": resp_json["refresh_token"],
         "access_token": resp_json["access_token"],
-        "expires_in": resp_json["expires_in"],
     }
 
 

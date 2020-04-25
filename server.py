@@ -1,4 +1,4 @@
-import os
+import json
 import re
 from contextlib import closing
 from datetime import datetime, timedelta
@@ -10,11 +10,13 @@ import requests
 PORT = 8000
 CHUNK_SIZE = 1024 * 1024 * 2  # 2MB in bytes
 
-CLIENT_ID = os.environ["GFLICK_ID"]
-CLIENT_SECRET = os.environ["GFLICK_SECRET"]
-REFRESH_TOKEN = os.environ["GFLICK_REFRESH"]
+with open("tokens.json", "r") as tfile:
+    tokens = json.load(tfile)
 
-_ACCESS_TOKEN = None
+CLIENT_ID = tokens["client_id"]
+CLIENT_SECRET = tokens["client_secret"]
+REFRESH_TOKEN = tokens["refresh_token"]
+ACCESS_TOKEN = None
 
 
 def get_access_token(clientId: str, clientSecret: str, refreshToken: str) -> str:
@@ -51,31 +53,31 @@ def refresh_token_if_necessary(expiries={}):
     Refreshes token if not set or about to expire.
     Returns usable token if succeeded, otherwise None.
     """
-    global _ACCESS_TOKEN
+    global ACCESS_TOKEN
 
     should_refresh = False
 
-    if not _ACCESS_TOKEN:
+    if not ACCESS_TOKEN:
         print("Token not found")
         should_refresh = True
 
-    elif expiries.get(_ACCESS_TOKEN) <= datetime.now() + timedelta(seconds=30):
-        print(f"Token {_ACCESS_TOKEN[:15]}[...] about to expire")
+    elif expiries.get(ACCESS_TOKEN) <= datetime.now() + timedelta(seconds=30):
+        print(f"Token {ACCESS_TOKEN[:15]}[...] about to expire")
         should_refresh = True
 
     else:
-        print(f"Reusing token {_ACCESS_TOKEN[:15]}[...]")
+        print(f"Reusing token {ACCESS_TOKEN[:15]}[...]")
 
     if should_refresh:
-        _ACCESS_TOKEN, expiration = get_access_token(
+        ACCESS_TOKEN, expiration = get_access_token(
             CLIENT_ID, CLIENT_SECRET, REFRESH_TOKEN
         )
-        if _ACCESS_TOKEN:
-            expiries[_ACCESS_TOKEN] = expiration
+        if ACCESS_TOKEN:
+            expiries[ACCESS_TOKEN] = expiration
         else:
             return None
 
-    return _ACCESS_TOKEN
+    return ACCESS_TOKEN
 
 
 # This server only serves GET and HEAD requests
