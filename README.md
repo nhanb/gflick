@@ -1,12 +1,12 @@
-# Boring threaded server
+# Boring, simple threaded server
 
 ```sh
-pip install urllib3
-python server.py
+pip install requests
+echo server.py | entr -r python server.py
 # http://localhost:8000/v/<gdrive_file_id>
 ```
 
-# Shiny (crazy) async server
+# Shiny (read: weird) async server
 
 ```sh
 pip install starlette aiohttp uvicorn
