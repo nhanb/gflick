@@ -1,6 +1,7 @@
 import os
 import re
 from contextlib import closing
+from datetime import datetime, timedelta
 from enum import Enum, unique
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -13,10 +14,13 @@ CLIENT_ID = os.environ["GFLICK_ID"]
 CLIENT_SECRET = os.environ["GFLICK_SECRET"]
 REFRESH_TOKEN = os.environ["GFLICK_REFRESH"]
 
-ACCESS_TOKEN = None
+_ACCESS_TOKEN = None
 
 
 def get_access_token(clientId: str, clientSecret: str, refreshToken: str) -> str:
+    print("Refreshing access token")
+    start_time = datetime.now()
+
     r = requests.post(
         "https://www.googleapis.com/oauth2/v4/token",
         headers={"Accept": "application/json"},
@@ -34,7 +38,44 @@ def get_access_token(clientId: str, clientSecret: str, refreshToken: str) -> str
         print(r.data, "\n")
         return None
 
-    return r.json()["access_token"]
+    rjson = r.json()
+    token = rjson["access_token"]
+    expiration = start_time + timedelta(seconds=rjson["expires_in"])
+
+    print(f"Got access token: {token[:15]}[...]")
+    return token, expiration
+
+
+def refresh_token_if_necessary(expiries={}):
+    """
+    Refreshes token if not set or about to expire.
+    Returns usable token if succeeded, otherwise None.
+    """
+    global _ACCESS_TOKEN
+
+    should_refresh = False
+
+    if not _ACCESS_TOKEN:
+        print("Token not found.")
+        should_refresh = True
+
+    elif expiries.get(_ACCESS_TOKEN) <= datetime.now() + timedelta(seconds=30):
+        print(f"Token {_ACCESS_TOKEN[:15]}[...] about to expire.")
+        should_refresh = True
+
+    else:
+        print(f"Reusing token {_ACCESS_TOKEN[:15]}[...]")
+
+    if should_refresh:
+        _ACCESS_TOKEN, expiration = get_access_token(
+            CLIENT_ID, CLIENT_SECRET, REFRESH_TOKEN
+        )
+        if _ACCESS_TOKEN:
+            expiries[_ACCESS_TOKEN] = expiration
+        else:
+            return None
+
+    return _ACCESS_TOKEN
 
 
 # This server only serves GET and HEAD requests
@@ -51,18 +92,15 @@ class Handler(BaseHTTPRequestHandler):
         for k, v in self.headers.items():
             print(f"  {k}: {v}")
 
-        global ACCESS_TOKEN
+        token = refresh_token_if_necessary()
 
-        if not ACCESS_TOKEN:
-            ACCESS_TOKEN = get_access_token(CLIENT_ID, CLIENT_SECRET, REFRESH_TOKEN)
-
-        if not ACCESS_TOKEN:
+        if not token:
             self.send_response(500, "FAILED")
             self.end_headers()
             return
 
         req_headers = {}
-        req_headers["Authorization"] = f"Bearer {ACCESS_TOKEN}"
+        req_headers["Authorization"] = f"Bearer {token}"
         if "Range" in self.headers:
             req_headers["Range"] = self.headers["Range"]
 
