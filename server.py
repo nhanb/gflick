@@ -4,6 +4,7 @@ from contextlib import closing
 from datetime import datetime, timedelta
 from enum import Enum, unique
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from string import Template
 
 import requests
 
@@ -48,7 +49,7 @@ def get_access_token(clientId: str, clientSecret: str, refreshToken: str) -> str
     return token, expiration
 
 
-def refresh_token_if_necessary(expiries={}):
+def get_token(expiries={}):
     """
     Refreshes token if not set or about to expire.
     Returns usable token if succeeded, otherwise None.
@@ -87,14 +88,104 @@ class Http(Enum):
     HEAD = "HEAD"
 
 
+def file_html(drive_id, data):
+    if data["mimeType"] == "application/vnd.google-apps.folder":
+        return f'<li><a href="/d/{drive_id}/{data["id"]}">{data["name"]}</a></li>'
+    else:
+        return f'<li><a href="/v/{data["id"]}">{data["name"]}</a></li>'
+
+
+def page_html(title, body):
+    return Template(
+        """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>$title</title>
+</head>
+<body>
+    $body
+</body>
+</html>
+"""
+    ).substitute(title=title, body=body)
+
+
 class Handler(BaseHTTPRequestHandler):
+    def serve_drive(self, http_method: Http, drive_id, folder_id=None):
+        if http_method == Http.HEAD:
+            self.send_response(405, "METHOD NOT SUPPORTED")
+            self.end_headers()
+            return
+
+        token = get_token()
+        if not token:
+            self.send_response(500, "FAILED")
+            self.end_headers()
+            return
+
+        parent = folder_id or drive_id
+        api_resp = requests.get(
+            "https://www.googleapis.com/drive/v3/files",
+            params={
+                "q": f"'{parent}' in parents",
+                "driveId": drive_id,
+                "corpora": "drive",
+                "includeItemsFromAllDrives": True,
+                "supportsAllDrives": True,
+                "orderBy": "name",
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert api_resp.status_code == 200, api_resp.text
+
+        self.send_response(200, "OK")
+        self.send_header("Content-Type", "text/html")
+        self.end_headers()
+
+        files = api_resp.json()["files"]
+        files_html = "\n".join(file_html(drive_id, d) for d in files)
+        html = page_html(parent, f"<ul>{files_html}</ul>")
+        self.wfile.write(html.encode())
+
+    def serve_drives(self, http_method: Http):
+        if http_method == Http.HEAD:
+            self.send_response(405, "METHOD NOT SUPPORTED")
+            self.end_headers()
+            return
+
+        token = get_token()
+        if not token:
+            self.send_response(500, "FAILED")
+            self.end_headers()
+            return
+
+        api_resp = requests.get(
+            "https://www.googleapis.com/drive/v3/drives",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert api_resp.status_code == 200, api_resp.text
+
+        self.send_response(200, "OK")
+        self.send_header("Content-Type", "text/html")
+        self.end_headers()
+
+        drives = api_resp.json()["drives"]
+        drives_html = "\n".join(
+            f'<li><a href="/d/{d["id"]}">{d["name"]}</a></li>' for d in drives
+        )
+        self.wfile.write(f"<ul>{drives_html}</ul>".encode())
+
     def serve_video(self, http_method: Http, videoId):
 
         print(f"{http_method} request headers:")
         for k, v in self.headers.items():
             print(f"  {k}: {v}")
 
-        token = refresh_token_if_necessary()
+        token = get_token()
 
         if not token:
             self.send_response(500, "FAILED")
@@ -138,7 +229,12 @@ class Handler(BaseHTTPRequestHandler):
 
     # ROUTING LOGIC FOLLOWS
 
-    routes = {re.compile(r"^/v/([\w\-]+)/?$"): serve_video}
+    routes = {
+        re.compile(r"^/v/([\w\-]+)/?$"): serve_video,
+        re.compile(r"^/$"): serve_drives,
+        re.compile(r"^/d/([\w\-]+)/?$"): serve_drive,
+        re.compile(r"^/d/([\w\-]+)/([\w\-]+)/?$"): serve_drive,
+    }
 
     def route(self, http_method: Http):
         assert http_method in [Http.GET, Http.HEAD]
