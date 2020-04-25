@@ -1,3 +1,4 @@
+import base64
 import json
 import re
 from contextlib import closing
@@ -95,9 +96,13 @@ def file_html(drive_id, data):
         return f'<li><a href="/v/{data["id"]}">{data["name"]}</a></li>'
 
 
-def page_html(title, body):
-    return Template(
-        """
+js = ""
+css = ""
+with open("script.js", "r") as jsfile:
+    js = jsfile.read()
+with open("style.css", "r") as cssfile:
+    css = cssfile.read()
+html_template_str = f"""
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -107,9 +112,23 @@ def page_html(title, body):
 <body>
     $body
 </body>
+<script>
+$server_provided_js
+{js}
+</script>
+<style>{css}</style>
 </html>
 """
-    ).substitute(title=title, body=body)
+
+
+def page_html(title, body, username="", password=""):
+    server_provided_js = f"""
+    const username = '{username}';
+    const password = '{password}';
+    """
+    return Template(html_template_str).substitute(
+        title=title, body=body, js=js, css=css, server_provided_js=server_provided_js
+    )
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -145,9 +164,23 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/html")
         self.end_headers()
 
+        # Read basicauth username & password back from header,
+        # pass them to frontend as javascript consts. See page_html().
+        username = ""
+        password = ""
+        auth_header = self.headers.get("authorization")
+        if auth_header and auth_header.startswith("Basic "):
+            encoded = auth_header[6:]
+            username, password = base64.b64decode(encoded).decode().split(":")
+
         files = api_resp.json()["files"]
         files_html = "\n".join(file_html(drive_id, d) for d in files)
-        html = page_html(parent, f"<ul>{files_html}</ul>")
+        html = page_html(
+            title=parent,
+            body=f"<ul>{files_html}</ul>",
+            username=username,
+            password=password,
+        )
         self.wfile.write(html.encode())
 
     def serve_drives(self, http_method: Http):
@@ -177,7 +210,8 @@ class Handler(BaseHTTPRequestHandler):
         drives_html = "\n".join(
             f'<li><a href="/d/{d["id"]}">{d["name"]}</a></li>' for d in drives
         )
-        self.wfile.write(f"<ul>{drives_html}</ul>".encode())
+        html = page_html("GFlick Home", f"<ul>{drives_html}</ul>")
+        self.wfile.write(html.encode())
 
     def serve_video(self, http_method: Http, videoId):
 
