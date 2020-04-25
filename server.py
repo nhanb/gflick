@@ -56,11 +56,11 @@ def refresh_token_if_necessary(expiries={}):
     should_refresh = False
 
     if not _ACCESS_TOKEN:
-        print("Token not found.")
+        print("Token not found")
         should_refresh = True
 
     elif expiries.get(_ACCESS_TOKEN) <= datetime.now() + timedelta(seconds=30):
-        print(f"Token {_ACCESS_TOKEN[:15]}[...] about to expire.")
+        print(f"Token {_ACCESS_TOKEN[:15]}[...] about to expire")
         should_refresh = True
 
     else:
@@ -128,8 +128,11 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             # is GET request => let's stream response body
-            for chunk in vid_resp.iter_content(CHUNK_SIZE):
-                self.wfile.write(chunk)
+            try:
+                for chunk in vid_resp.iter_content(CHUNK_SIZE):
+                    self.wfile.write(chunk)
+            except (ConnectionResetError, BrokenPipeError):
+                print(f"Client '{self.headers.get('User-Agent', '')}' aborted request")
 
     # ROUTING LOGIC FOLLOWS
 
@@ -148,7 +151,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
         if http_method == Http.GET:
-            self.wfile.write(b"Route not found.")
+            self.wfile.write(b"Route not found")
 
     def do_GET(self):
         self.route(Http.GET)
