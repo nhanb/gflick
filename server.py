@@ -1,6 +1,7 @@
 import os
 import re
 from contextlib import closing
+from enum import Enum, unique
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import requests
@@ -15,7 +16,7 @@ REFRESH_TOKEN = os.environ["GFLICK_REFRESH"]
 ACCESS_TOKEN = None
 
 
-def getAccessToken(clientId: str, clientSecret: str, refreshToken: str) -> str:
+def get_access_token(clientId: str, clientSecret: str, refreshToken: str) -> str:
     r = requests.post(
         "https://www.googleapis.com/oauth2/v4/token",
         headers={"Accept": "application/json"},
@@ -36,16 +37,24 @@ def getAccessToken(clientId: str, clientSecret: str, refreshToken: str) -> str:
     return r.json()["access_token"]
 
 
+# This server only serves GET and HEAD requests
+@unique
+class Http(Enum):
+    GET = "GET"
+    HEAD = "HEAD"
+
+
 class Handler(BaseHTTPRequestHandler):
-    def serve_video(self, videoId):
-        print("Request headers:")
+    def serve_video(self, http_method: Http, videoId):
+
+        print(f"{http_method} request headers:")
         for k, v in self.headers.items():
             print(f"  {k}: {v}")
 
         global ACCESS_TOKEN
 
         if not ACCESS_TOKEN:
-            ACCESS_TOKEN = getAccessToken(CLIENT_ID, CLIENT_SECRET, REFRESH_TOKEN)
+            ACCESS_TOKEN = get_access_token(CLIENT_ID, CLIENT_SECRET, REFRESH_TOKEN)
 
         if not ACCESS_TOKEN:
             self.send_response(500, "FAILED")
@@ -59,7 +68,12 @@ class Handler(BaseHTTPRequestHandler):
 
         url = f"https://www.googleapis.com/drive/v3/files/{videoId}?alt=media"
 
-        with closing(requests.get(url, headers=req_headers, stream=True)) as vid_resp:
+        if http_method == Http.GET:
+            request_func = requests.get
+        elif http_method == Http.HEAD:
+            request_func = requests.head
+
+        with closing(request_func(url, headers=req_headers, stream=True)) as vid_resp:
             if vid_resp.status_code != 200:
                 self.send_response(vid_resp.status_code, "FAILED")
             else:
@@ -72,25 +86,37 @@ class Handler(BaseHTTPRequestHandler):
 
             self.end_headers()
 
+            if http_method == Http.HEAD:
+                return
+
+            # is GET request => let's stream response body
             for chunk in vid_resp.iter_content(CHUNK_SIZE):
                 self.wfile.write(chunk)
 
+    # ROUTING LOGIC FOLLOWS
+
     routes = {re.compile(r"^/v/([\w\-]+)/?$"): serve_video}
 
-    def do_GET(self):
+    def route(self, http_method: Http):
+        assert http_method in [Http.GET, Http.HEAD]
+
         for pattern, handler in self.routes.items():
             match = pattern.match(self.path)
             if match:
-                handler(self, *match.groups())
-                return
+                handler(self, http_method, *match.groups())
+                return True
 
         self.send_response(404, "NOT FOUND")
         self.end_headers()
-        self.wfile.write(b"Nothing to see here.")
+
+        if http_method == Http.GET:
+            self.wfile.write(b"Route not found.")
+
+    def do_GET(self):
+        self.route(Http.GET)
 
     def do_HEAD(self):
-        self.send_response(200, "OKLAH")
-        self.end_headers()
+        self.route(Http.HEAD)
 
 
 def run(server_class=ThreadingHTTPServer, handler_class=Handler):
