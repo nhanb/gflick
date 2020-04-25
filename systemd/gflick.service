@@ -1,0 +1,14 @@
+[Unit]
+Description=GFlick server
+After=network-online.target
+Wants=network-online.target systemd-networkd-wait-online.service
+
+[Service]
+Restart=on-abnormal
+User=gflick
+Group=gflick
+WorkingDirectory=/home/gflick/gflick
+ExecStart=/usr/bin/python3.7 /home/gflick/gflick/server.py
+
+[Install]
+WantedBy=multi-user.target
