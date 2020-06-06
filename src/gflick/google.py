@@ -8,6 +8,8 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 import requests
 
+# TODO use curio + h11 instead of requests
+
 """
 Helper script to quickly get user consent for GDrive API access.
 Simply run `python google.py` and follow instructions.
@@ -131,5 +133,13 @@ def get_access_token(refresh_token):
     }
 
 
-if __name__ == "__main__":
-    main()
+def load_credentials():
+    with open(TOKENS_FILE, "r") as tfile:
+        tokens = json.load(tfile)
+
+    return {
+        "client_id": tokens["client_id"],
+        "client_secret": tokens["client_secret"],
+        "refresh_token": tokens["refresh_token"],
+        "access_token": None,
+    }
