@@ -17,6 +17,7 @@ TOKENS_FILE = "tokens.json"
 
 CLIENT_ID = os.environ.get("CLIENT_ID") or input("CLIENT_ID: ").strip()
 CLIENT_SECRET = os.environ.get("CLIENT_SECRET") or input("CLIENT_SECRET: ").strip()
+USER_PASSWORD = os.environ.get("USER_PASSWORD") or input("USER_PASSWORD: ").strip()
 
 
 def main():
@@ -29,6 +30,7 @@ def main():
     tokens["authorization_code"] = authorization_code
     tokens["client_id"] = CLIENT_ID
     tokens["client_secret"] = CLIENT_SECRET
+    tokens["user_password"] = USER_PASSWORD
     with open(TOKENS_FILE, "w") as tfile:
         tfile.write(json.dumps(tokens, indent=2, sort_keys=True))
     print(f"Results written to {TOKENS_FILE}")

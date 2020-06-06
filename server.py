@@ -1,11 +1,14 @@
 import base64
 import json
 import re
+import secrets
 from contextlib import closing
 from datetime import datetime, timedelta
 from enum import Enum, unique
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from string import Template
+from urllib.parse import parse_qs
 
 import requests
 
@@ -19,6 +22,9 @@ CLIENT_ID = tokens["client_id"]
 CLIENT_SECRET = tokens["client_secret"]
 REFRESH_TOKEN = tokens["refresh_token"]
 ACCESS_TOKEN = None
+
+USER_PASSWORD = tokens["user_password"]
+USER_TOKEN = secrets.token_urlsafe(128)
 
 
 def get_access_token(clientId: str, clientSecret: str, refreshToken: str) -> str:
@@ -87,13 +93,14 @@ def get_token(expiries={}):
 class Http(Enum):
     GET = "GET"
     HEAD = "HEAD"
+    POST = "POST"
 
 
 def file_html(drive_id, data):
     if data["mimeType"] == "application/vnd.google-apps.folder":
         return f'<li><a href="/d/{drive_id}/{data["id"]}">{data["name"]}</a></li>'
     else:
-        return f'<li><a href="/v/{data["id"]}">{data["name"]}</a></li>'
+        return f'<li><a href="/v/{data["id"]}/{USER_TOKEN}">{data["name"]}</a></li>'
 
 
 js = ""
@@ -107,6 +114,7 @@ html_template_str = f"""
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>$title</title>
 </head>
 <body>
@@ -133,7 +141,7 @@ def page_html(title, body, username="", password=""):
 
 class Handler(BaseHTTPRequestHandler):
     def serve_drive(self, http_method: Http, drive_id, folder_id=None):
-        if http_method == Http.HEAD:
+        if http_method != Http.GET:
             self.send_response(405, "METHOD NOT SUPPORTED")
             self.end_headers()
             return
@@ -184,7 +192,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(html.encode())
 
     def serve_drives(self, http_method: Http):
-        if http_method == Http.HEAD:
+        if http_method != Http.GET:
             self.send_response(405, "METHOD NOT SUPPORTED")
             self.end_headers()
             return
@@ -213,7 +221,16 @@ class Handler(BaseHTTPRequestHandler):
         html = page_html("GFlick Home", f"<ul>{drives_html}</ul>")
         self.wfile.write(html.encode())
 
-    def serve_video(self, http_method: Http, videoId):
+    def serve_video(self, http_method: Http, videoId, user_token):
+        if http_method not in [Http.GET, Http.HEAD]:
+            self.send_response(405, "METHOD NOT SUPPORTED")
+            self.end_headers()
+            return
+
+        if user_token != USER_TOKEN:
+            self.send_response(403, "Nothing to see here.")
+            self.end_headers()
+            return
 
         print(f"{http_method} request headers:")
         for k, v in self.headers.items():
@@ -261,17 +278,61 @@ class Handler(BaseHTTPRequestHandler):
             except (ConnectionResetError, BrokenPipeError):
                 print(f"Client '{self.headers.get('User-Agent', '')}' aborted request")
 
+    def serve_login_form(self, method):
+        if method in (Http.GET, Http.HEAD):
+            self.send_response(200, "OK")
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            if method == Http.GET:
+                self.wfile.write(
+                    page_html(
+                        title="Login first!",
+                        body="""
+<form action="/login" method="post">
+    <label for="name">Enter password:</label>
+    <input type="password" name="password" id="password" required autofocus />
+    <input type="submit" value="Login" />
+</form>""",
+                    ).encode()
+                )
+
+        elif method == Http.POST:
+            content_len = int(self.headers.get("Content-Length"))
+            post_body = self.rfile.read(content_len).decode()
+            try:
+                password = parse_qs(post_body)["password"][0]
+                assert password == USER_PASSWORD
+            except Exception:
+                self.send_response(400, "Invalid password")
+                self.send_header("Content-Type", "text/plain")
+                self.end_headers()
+                import traceback
+
+                traceback.print_exc()
+                self.wfile.write("Invalid password".encode())
+                return
+
+            # Password is correct!
+            self.send_response(302, "Invalid password")
+            self.send_header("Set-Cookie", f"user_token={USER_TOKEN}")
+            self.send_header("Location", "/")
+            self.end_headers()
+
     # ROUTING LOGIC FOLLOWS
 
     routes = {
-        re.compile(r"^/v/([\w\-]+)/?$"): serve_video,
+        re.compile(r"^/v/([\w\-]+)/([\w\-]+)/?$"): serve_video,
         re.compile(r"^/$"): serve_drives,
         re.compile(r"^/d/([\w\-]+)/?$"): serve_drive,
         re.compile(r"^/d/([\w\-]+)/([\w\-]+)/?$"): serve_drive,
+        re.compile(r"^/login/?$"): serve_login_form,
     }
 
     def route(self, http_method: Http):
-        assert http_method in [Http.GET, Http.HEAD]
+        assert http_method in [Http.GET, Http.HEAD, Http.POST]
+
+        if not self.path.startswith("/v/") and not self.check_auth():
+            return
 
         for pattern, handler in self.routes.items():
             match = pattern.match(self.path)
@@ -290,6 +351,26 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_HEAD(self):
         self.route(Http.HEAD)
+
+    def do_POST(self):
+        self.route(Http.POST)
+
+    def check_auth(self):
+        cookie = SimpleCookie()
+        cookie.load(self.headers.get("cookie", ""))
+
+        token = cookie.get("user_token")
+
+        if (not token or token.value != USER_TOKEN) and not self.path.startswith(
+            "/login"
+        ):
+            self.send_response(302, "Moved Temporarily")
+            self.send_header("Location", "/login")
+            self.send_header("Set-Cookie", "user_token=")
+            self.end_headers()
+            return False
+
+        return True
 
 
 def run(server_class=ThreadingHTTPServer, handler_class=Handler):
