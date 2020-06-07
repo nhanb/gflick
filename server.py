@@ -8,7 +8,7 @@ from enum import Enum, unique
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from string import Template
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, quote
 
 import requests
 
@@ -25,6 +25,7 @@ ACCESS_TOKEN = None
 
 USER_PASSWORD = tokens["user_password"]
 USER_TOKEN = secrets.token_urlsafe(128)
+VIDEO_TOKEN = secrets.token_urlsafe(128)
 
 
 def get_access_token(clientId: str, clientSecret: str, refreshToken: str) -> str:
@@ -100,7 +101,8 @@ def file_html(drive_id, data):
     if data["mimeType"] == "application/vnd.google-apps.folder":
         return f'<li><a href="/d/{drive_id}/{data["id"]}">{data["name"]}</a></li>'
     else:
-        return f'<li><a href="/v/{data["id"]}/{USER_TOKEN}">{data["name"]}</a></li>'
+        filename = quote(data["name"])
+        return f'<li><a href="/v/{data["id"]}/{VIDEO_TOKEN}/{filename}">{data["name"]}</a></li>'
 
 
 js = ""
@@ -221,13 +223,13 @@ class Handler(BaseHTTPRequestHandler):
         html = page_html("GFlick Home", f"<ul>{drives_html}</ul>")
         self.wfile.write(html.encode())
 
-    def serve_video(self, http_method: Http, videoId, user_token):
+    def serve_video(self, http_method: Http, videoId, video_token):
         if http_method not in [Http.GET, Http.HEAD]:
             self.send_response(405, "METHOD NOT SUPPORTED")
             self.end_headers()
             return
 
-        if user_token != USER_TOKEN:
+        if video_token != VIDEO_TOKEN:
             self.send_response(403, "Nothing to see here.")
             self.end_headers()
             return
@@ -314,14 +316,14 @@ class Handler(BaseHTTPRequestHandler):
 
             # Password is correct!
             self.send_response(302, "Invalid password")
-            self.send_header("Set-Cookie", f"user_token={USER_TOKEN}")
+            self.send_header("Set-Cookie", f"user_token={USER_TOKEN}; Path=/")
             self.send_header("Location", "/")
             self.end_headers()
 
     # ROUTING LOGIC FOLLOWS
 
     routes = {
-        re.compile(r"^/v/([\w\-]+)/([\w\-]+)/?$"): serve_video,
+        re.compile(r"^/v/([\w\-]+)/([\w\-]+)/.*/?$"): serve_video,
         re.compile(r"^/$"): serve_drives,
         re.compile(r"^/d/([\w\-]+)/?$"): serve_drive,
         re.compile(r"^/d/([\w\-]+)/([\w\-]+)/?$"): serve_drive,
@@ -366,7 +368,7 @@ class Handler(BaseHTTPRequestHandler):
         ):
             self.send_response(302, "Moved Temporarily")
             self.send_header("Location", "/login")
-            self.send_header("Set-Cookie", "user_token=")
+            self.send_header("Set-Cookie", "user_token=; Path=/")
             self.end_headers()
             return False
 
