@@ -99,10 +99,10 @@ class Http(Enum):
 
 def file_html(drive_id, data):
     if data["mimeType"] == "application/vnd.google-apps.folder":
-        return f'<li><a href="/d/{drive_id}/{data["id"]}">{data["name"]}</a></li>'
+        return f'<p><a href="/d/{drive_id}/{data["id"]}">{data["name"]}</a></p>'
     else:
         filename = quote(data["name"])
-        return f'<li><a href="/v/{data["id"]}/{VIDEO_TOKEN}/{filename}">{data["name"]}</a></li>'
+        return f'<p><a href="/v/{data["id"]}/{VIDEO_TOKEN}/{filename}">{data["name"]}</a></p>'
 
 
 js = ""
@@ -186,10 +186,7 @@ class Handler(BaseHTTPRequestHandler):
         files = api_resp.json()["files"]
         files_html = "\n".join(file_html(drive_id, d) for d in files)
         html = page_html(
-            title=parent,
-            body=f"<ul>{files_html}</ul>",
-            username=username,
-            password=password,
+            title=parent, body=files_html, username=username, password=password,
         )
         self.wfile.write(html.encode())
 
@@ -218,9 +215,9 @@ class Handler(BaseHTTPRequestHandler):
 
         drives = api_resp.json()["drives"]
         drives_html = "\n".join(
-            f'<li><a href="/d/{d["id"]}">{d["name"]}</a></li>' for d in drives
+            f'<p><a href="/d/{d["id"]}">{d["name"]}</a></p>' for d in drives
         )
-        html = page_html("GFlick Home", f"<ul>{drives_html}</ul>")
+        html = page_html("GFlick Home", drives_html)
         self.wfile.write(html.encode())
 
     def serve_video(self, http_method: Http, videoId, video_token):
