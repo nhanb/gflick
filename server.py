@@ -99,10 +99,14 @@ class Http(Enum):
 
 def file_html(drive_id, data):
     if data["mimeType"] == "application/vnd.google-apps.folder":
-        return f'<p><a href="/d/{drive_id}/{data["id"]}">{data["name"]}</a></p>'
+        return f'<p>&#128193;&nbsp;<a href="/d/{drive_id}/{data["id"]}">{data["name"]}</a></p>'
     else:
         filename = quote(data["name"])
-        return f'<p><a href="/v/{data["id"]}/{VIDEO_TOKEN}/{filename}">{data["name"]}</a></p>'
+        inner_text = data["name"]
+        thumbnail_link = data.get("thumbnailLink")
+        if thumbnail_link:
+            inner_text = f'<img src="{thumbnail_link}" /><br/>{inner_text}'
+        return f'<p><a href="/v/{data["id"]}/{VIDEO_TOKEN}/{filename}">{inner_text}</a></p>'
 
 
 js = ""
@@ -159,11 +163,12 @@ class Handler(BaseHTTPRequestHandler):
             "https://www.googleapis.com/drive/v3/files",
             params={
                 "q": f"'{parent}' in parents",
+                "fields": "files(id,name,mimeType,thumbnailLink)",
                 "driveId": drive_id,
                 "corpora": "drive",
                 "includeItemsFromAllDrives": True,
                 "supportsAllDrives": True,
-                "orderBy": "name",
+                "orderBy": "folder,name,createdTime desc",
             },
             headers={"Authorization": f"Bearer {token}"},
         )

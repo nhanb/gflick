@@ -2,3 +2,10 @@ html {
   font-size: 100%;
   line-height: 1.5em;
 }
+
+p {
+  background-color: #eee;
+  padding: 0.5em;
+  border: 2px solid black;
+  overflow-wrap: break-word;
+}
