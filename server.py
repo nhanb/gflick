@@ -263,6 +263,12 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Accept-Ranges", "bytes")
 
             for hkey, hval in vid_resp.headers.items():
+                # The http library (urllib3) already "unchunked" the response stream,
+                # so forwarding `Transfer-Encoding: chunked` as-is to end user will
+                # result in error. Therefore, let's skip it:
+                if (hkey, hval) == ("Transfer-Encoding", "chunked"):
+                    print("Skipped", hkey, hval)
+                    continue
                 self.send_header(hkey, hval)
 
             self.end_headers()
@@ -272,7 +278,7 @@ class Handler(BaseHTTPRequestHandler):
 
             # is GET request => let's stream response body
             try:
-                for chunk in vid_resp.iter_content(CHUNK_SIZE):
+                for chunk in vid_resp.raw.stream(CHUNK_SIZE):
                     self.wfile.write(chunk)
             except (ConnectionResetError, BrokenPipeError):
                 print(f"Client '{self.headers.get('User-Agent', '')}' aborted request")
