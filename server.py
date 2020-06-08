@@ -2,6 +2,7 @@ import base64
 import json
 import re
 import secrets
+import time
 from contextlib import closing
 from datetime import datetime, timedelta
 from enum import Enum, unique
@@ -347,6 +348,10 @@ class Handler(BaseHTTPRequestHandler):
 
                 traceback.print_exc()
                 self.wfile.write("Invalid password".encode())
+
+                # Prevents lazy brute force attacks,
+                # Probably not effective until proper rate limiting is implemented.
+                time.sleep(5)
                 return
 
             # Password is correct!
