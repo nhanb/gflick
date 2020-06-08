@@ -8,7 +8,7 @@ from enum import Enum, unique
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from string import Template
-from urllib.parse import parse_qs, quote
+from urllib.parse import parse_qs, quote, unquote
 
 import requests
 
@@ -228,6 +228,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(html.encode())
 
     def serve_generate_slug(self, http_method: Http, file_id, file_name):
+        file_name = unquote(file_name)
+
         if http_method != Http.GET:
             self.send_response(405, "METHOD NOT SUPPORTED")
             self.end_headers()
@@ -235,9 +237,20 @@ class Handler(BaseHTTPRequestHandler):
 
         slug = db.get_or_create_link(file_id)
 
-        self.send_response(303, "See Other")
-        self.send_header("Location", f"/v/{slug}/{file_name}")
+        self.send_response(200, "OK")
+        self.send_header("Content-Type", "text/html")
         self.end_headers()
+        self.wfile.write(
+            page_html(
+                "View file",
+                "<div>This is a <strong>publicly accessible</strong> direct link:</div>"
+                f'<a href="/v/{slug}/{quote(file_name)}">{file_name}</a>',
+            ).encode()
+        )
+
+        # self.send_response(303, "See Other")
+        # self.send_header("Location", f"/v/{slug}/{file_name}")
+        # self.end_headers()
 
     def serve_video(self, http_method: Http, video_slug):
         if http_method not in [Http.GET, Http.HEAD]:
