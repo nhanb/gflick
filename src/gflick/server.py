@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, quote, unquote
 
 import requests
 
-import db
+from . import db
 
 PORT = 8000
 CHUNK_SIZE = 1024 * 1024 * 2  # 2MB in bytes
