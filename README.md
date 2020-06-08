@@ -17,22 +17,22 @@ header](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Range).
 
 # Running it
 
-This is a very quick and dirty implementation that's full of duplicate code and
-is built upon the standard library's non-production-ready httpserver. But hey
-if you put it behind basic-auth'd nginx it's probably fine for personal use.
-Maybe.
+This originally started as a quick and dirty SimpleHTTPServer proof-of-concept
+and is now in the progress of being ported to run on bottle + gunicorn for some
+semblance of sanity. Maybe check back later if you want to actually use it.
 
-The only dependency is `requests`, which is probably available as a proper OS
-package on most linux distros.
+The following are notes for my own use which are probably out of sync with the
+codebase's reality. I'll eventually clean them up. Maybe.
 
 You need to first create an oauth client from console.developers.google.com,
 then:
 
 ```sh
-python google.py
+poetry install
+gflick-google
 # Follow the script's instructions to authorize your newly created client.
 # Once that's done, tokens.json will be created, which will be used by server.py.
-echo server.py | entr -r python server.py
+echo server.py | entr -r gflick-dev
 # Visit http://localhost:8000
 ```
 

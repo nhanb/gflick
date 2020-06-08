@@ -28,6 +28,15 @@ def init():
         """
     )
 
+    run_sql(
+        """
+        CREATE TABLE IF NOT EXISTS key_val (
+            key TEXT UNIQUE,
+            val TEXT
+        );
+        """
+    )
+
 
 def create_link(file_id):
     """
@@ -76,3 +85,18 @@ def delete_old_links():
         WHERE datetime(created_at) < datetime('now', '-1 day');
         """
     )
+
+
+def keyval_set(key, val):
+    run_sql(
+        """
+        INSERT INTO key_val (key, val) VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET val=excluded.val;
+        """,
+        (key, val),
+    )
+
+
+def keyval_get(key, default=""):
+    result, _ = run_sql("SELECT val FROM key_val WHERE key=?;", (key,))
+    return result[0][0] if result else default

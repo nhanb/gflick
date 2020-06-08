@@ -1,20 +1,11 @@
 import json
 import secrets
+import time
 from contextlib import closing
-from datetime import datetime, timedelta
 from string import Template
 from urllib.parse import quote, unquote
 
-from bottle import (
-    HTTPError,
-    HTTPResponse,
-    hook,
-    install,
-    request,
-    response,
-    route,
-    run,
-)
+from bottle import HTTPError, HTTPResponse, request, response, route, run
 # Explicit names so I don't mistake between `requests` and bottle's `request`
 from requests import get as requests_get
 from requests import head as requests_head
@@ -31,15 +22,13 @@ with open("tokens.json", "r") as tfile:
 CLIENT_ID = tokens["client_id"]
 CLIENT_SECRET = tokens["client_secret"]
 REFRESH_TOKEN = tokens["refresh_token"]
-ACCESS_TOKEN = None
-
 USER_PASSWORD = tokens["user_password"]
 USER_TOKEN = secrets.token_urlsafe(128)
 
 
 def get_access_token(clientId: str, clientSecret: str, refreshToken: str) -> str:
     print("Refreshing access token")
-    start_time = datetime.now()
+    start_time = time.time()
 
     r = requests_post(
         "https://www.googleapis.com/oauth2/v4/token",
@@ -60,42 +49,44 @@ def get_access_token(clientId: str, clientSecret: str, refreshToken: str) -> str
 
     rjson = r.json()
     token = rjson["access_token"]
-    expiration = start_time + timedelta(seconds=rjson["expires_in"])
+    expiration = start_time + rjson["expires_in"]
 
     print(f"Got access token: {token[:15]}[...]")
     return token, expiration
 
 
-def get_token(expiries={}):
+def get_token():
     """
     Refreshes token if not set or about to expire.
     Returns usable token if succeeded, otherwise None.
     """
-    global ACCESS_TOKEN
-
     should_refresh = False
+    token_text = db.keyval_get("gdrive_access_token")
 
-    if not ACCESS_TOKEN:
-        print("Token not found")
+    if not token_text:
+        print("Token not found in db")
         should_refresh = True
-
-    elif expiries.get(ACCESS_TOKEN) <= datetime.now() + timedelta(seconds=30):
-        print(f"Token {ACCESS_TOKEN[:15]}[...] about to expire")
-        should_refresh = True
-
     else:
-        print(f"Reusing token {ACCESS_TOKEN[:15]}[...]")
+        token_json = json.loads(token_text)
+        expiration = token_json["expiration"]
+        token = token_json["token"]
+        if expiration <= time.time() + 30:
+            print(f"Token {token[:15]}[...] about to expire")
+            should_refresh = True
+        else:
+            print(f"Reusing token {token[:15]}[...]")
 
     if should_refresh:
-        ACCESS_TOKEN, expiration = get_access_token(
-            CLIENT_ID, CLIENT_SECRET, REFRESH_TOKEN
-        )
-        if ACCESS_TOKEN:
-            expiries[ACCESS_TOKEN] = expiration
+        token, expiration = get_access_token(CLIENT_ID, CLIENT_SECRET, REFRESH_TOKEN)
+        if token:
+            db.keyval_set(
+                "gdrive_access_token",
+                json.dumps({"token": token, "expiration": expiration}),
+            )
         else:
             return None
 
-    return ACCESS_TOKEN
+    return token
 
 
 def file_html(drive_id, data):
