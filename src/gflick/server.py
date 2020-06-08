@@ -218,7 +218,8 @@ def view_video(file_slug, file_name):
             return HTTPResponse(200, headers=gflick_resp_headers)
 
         # is GET request => let's stream response body
-        response.headers = gflick_resp_headers
+        for hkey, hval in gflick_resp_headers.items():
+            response.headers.replace(hkey, hval)
         try:
             for chunk in vid_resp.raw.stream(CHUNK_SIZE):
                 yield chunk
@@ -263,7 +264,7 @@ def view_login():
 
 
 def run_dev():
-    gunicorn_kwargs = {"workers": 5, "reload": True}
+    gunicorn_kwargs = {"workers": 5, "reload": True, "debug": True}
     run(server="gunicorn", host="localhost", port=8000, **gunicorn_kwargs)
 
 
