@@ -108,7 +108,7 @@ def file_html(drive_id, data):
         thumbnail_link = data.get("thumbnailLink")
         if thumbnail_link:
             inner_text = f'<img src="{thumbnail_link}" /><br/>{inner_text}'
-        return f'<p><a href="/v/{data["id"]}/{VIDEO_TOKEN}/{filename}">{inner_text}</a></p>'
+        return f'<p><a href="/slug/{data["id"]}/{filename}">{inner_text}</a></p>'
 
 
 js = ""
@@ -227,14 +227,27 @@ class Handler(BaseHTTPRequestHandler):
         html = page_html("GFlick Home", drives_html)
         self.wfile.write(html.encode())
 
-    def serve_video(self, http_method: Http, videoId, video_token):
+    def serve_generate_slug(self, http_method: Http, file_id, file_name):
+        if http_method != Http.GET:
+            self.send_response(405, "METHOD NOT SUPPORTED")
+            self.end_headers()
+            return
+
+        slug = db.get_or_create_link(file_id)
+
+        self.send_response(303, "See Other")
+        self.send_header("Location", f"/v/{slug}/{file_name}")
+        self.end_headers()
+
+    def serve_video(self, http_method: Http, video_slug):
         if http_method not in [Http.GET, Http.HEAD]:
             self.send_response(405, "METHOD NOT SUPPORTED")
             self.end_headers()
             return
 
-        if video_token != VIDEO_TOKEN:
-            self.send_response(403, "Nothing to see here.")
+        file_id = db.get_file_id(video_slug)
+        if not file_id:
+            self.send_response(404, "Nothing to see here.")
             self.end_headers()
             return
 
@@ -254,7 +267,7 @@ class Handler(BaseHTTPRequestHandler):
         if "Range" in self.headers:
             req_headers["Range"] = self.headers["Range"]
 
-        url = f"https://www.googleapis.com/drive/v3/files/{videoId}?alt=media"
+        url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
 
         if http_method == Http.GET:
             request_func = requests.get
@@ -333,7 +346,8 @@ class Handler(BaseHTTPRequestHandler):
     # ROUTING LOGIC FOLLOWS
 
     routes = {
-        re.compile(r"^/v/([\w\-]+)/([\w\-]+)/.*/?$"): serve_video,
+        re.compile(r"^/slug/([\w\-]+)/(.+)/?$"): serve_generate_slug,
+        re.compile(r"^/v/([\w\-]+)/.+/?$"): serve_video,
         re.compile(r"^/$"): serve_drives,
         re.compile(r"^/d/([\w\-]+)/?$"): serve_drive,
         re.compile(r"^/d/([\w\-]+)/([\w\-]+)/?$"): serve_drive,

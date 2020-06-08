@@ -1,6 +1,5 @@
 import secrets
 import sqlite3
-from collections import namedtuple
 
 
 def get_conn():
@@ -23,7 +22,6 @@ def init():
         """
         CREATE TABLE IF NOT EXISTS link (
             slug TEXT UNIQUE,
-            drive_id TEXT,
             file_id TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
@@ -31,18 +29,16 @@ def init():
     )
 
 
-def create_link(drive_id, file_id):
+def create_link(file_id):
     """
-    Generate 128-byte cryptographically strong slug on the fly to map to a
-    (drive_id, file_id) tuple.
-
+    Generate 128-byte cryptographically strong slug on the fly to Gdrive file_id.
     In the very unlikely event of slug collision, retry up to 3 times.
     """
     for i in range(4):
         try:
             _, lastrowid = run_sql(
-                "INSERT INTO link (slug, drive_id, file_id) VALUES (?, ?, ?);",
-                (secrets.token_urlsafe(128), drive_id, file_id),
+                "INSERT INTO link (slug, file_id) VALUES (?, ?);",
+                (secrets.token_urlsafe(128), file_id),
             )
             break
         except sqlite3.IntegrityError as e:
@@ -60,12 +56,17 @@ def create_link(drive_id, file_id):
     return results[0][0]
 
 
-Link = namedtuple("Link", ["drive_id", "file_id"])
+def get_or_create_link(file_id):
+    results, _ = run_sql("SELECT slug FROM link WHERE file_id=?;", (file_id,))
+    if results:
+        return results[0][0]
+    else:
+        return create_link(file_id)
 
 
-def get_link(slug):
-    results, _ = run_sql("SELECT drive_id, file_id FROM link WHERE slug=?;", (slug,))
-    return Link(*results[0]) if results else None
+def get_file_id(slug):
+    results, _ = run_sql("SELECT file_id FROM link WHERE slug=?;", (slug,))
+    return results[0][0] if results else None
 
 
 def delete_old_links():
