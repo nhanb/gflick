@@ -12,6 +12,8 @@ from urllib.parse import parse_qs, quote
 
 import requests
 
+import db
+
 PORT = 8000
 CHUNK_SIZE = 1024 * 1024 * 2  # 2MB in bytes
 
@@ -384,6 +386,9 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def run(server_class=ThreadingHTTPServer, handler_class=Handler):
+    db.init()
+    db.delete_old_links()
+
     server_address = ("", PORT)
     httpd = server_class(server_address, handler_class)
     httpd.serve_forever()
