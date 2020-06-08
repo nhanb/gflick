@@ -1,17 +1,24 @@
-import base64
 import json
-import re
 import secrets
-import time
 from contextlib import closing
 from datetime import datetime, timedelta
-from enum import Enum, unique
-from http.cookies import SimpleCookie
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from string import Template
-from urllib.parse import parse_qs, quote, unquote
+from urllib.parse import quote, unquote
 
-import requests
+from bottle import (
+    HTTPError,
+    HTTPResponse,
+    hook,
+    install,
+    request,
+    response,
+    route,
+    run,
+)
+# Explicit names so I don't mistake between `requests` and bottle's `request`
+from requests import get as requests_get
+from requests import head as requests_head
+from requests import post as requests_post
 
 from . import db
 
@@ -34,7 +41,7 @@ def get_access_token(clientId: str, clientSecret: str, refreshToken: str) -> str
     print("Refreshing access token")
     start_time = datetime.now()
 
-    r = requests.post(
+    r = requests_post(
         "https://www.googleapis.com/oauth2/v4/token",
         headers={"Accept": "application/json"},
         data={
@@ -91,14 +98,6 @@ def get_token(expiries={}):
     return ACCESS_TOKEN
 
 
-# This server only serves GET and HEAD requests
-@unique
-class Http(Enum):
-    GET = "GET"
-    HEAD = "HEAD"
-    POST = "POST"
-
-
 def file_html(drive_id, data):
     if data["mimeType"] == "application/vnd.google-apps.folder":
         return f'<p>&#128193;&nbsp;<a href="/d/{drive_id}/{data["id"]}">{data["name"]}</a></p>'
@@ -147,283 +146,136 @@ def page_html(title, body, username="", password=""):
     )
 
 
-class Handler(BaseHTTPRequestHandler):
-    def serve_drive(self, http_method: Http, drive_id, folder_id=None):
-        if http_method != Http.GET:
-            self.send_response(405, "METHOD NOT SUPPORTED")
-            self.end_headers()
-            return
+@route("/", method="GET")
+def view_index():
+    token = get_token()
+    if not token:
+        return HTTPError(500, "FAILED")
 
-        token = get_token()
-        if not token:
-            self.send_response(500, "FAILED")
-            self.end_headers()
-            return
+    api_resp = requests_get(
+        "https://www.googleapis.com/drive/v3/drives",
+        headers={"Authorization": f"Bearer {token}"},
+    )
 
-        parent = folder_id or drive_id
-        api_resp = requests.get(
-            "https://www.googleapis.com/drive/v3/files",
-            params={
-                "q": f"'{parent}' in parents",
-                "fields": "files(id,name,mimeType,thumbnailLink)",
-                "driveId": drive_id,
-                "corpora": "drive",
-                "includeItemsFromAllDrives": True,
-                "supportsAllDrives": True,
-                "orderBy": "folder,name,createdTime desc",
-            },
-            headers={"Authorization": f"Bearer {token}"},
-        )
-
-        assert api_resp.status_code == 200, api_resp.text
-
-        self.send_response(200, "OK")
-        self.send_header("Content-Type", "text/html")
-        self.end_headers()
-
-        # Read basicauth username & password back from header,
-        # pass them to frontend as javascript consts. See page_html().
-        username = ""
-        password = ""
-        auth_header = self.headers.get("authorization")
-        if auth_header and auth_header.startswith("Basic "):
-            encoded = auth_header[6:]
-            username, password = base64.b64decode(encoded).decode().split(":")
-
-        files = api_resp.json()["files"]
-        files_html = "\n".join(file_html(drive_id, d) for d in files)
-        html = page_html(
-            title=parent, body=files_html, username=username, password=password,
-        )
-        self.wfile.write(html.encode())
-
-    def serve_drives(self, http_method: Http):
-        if http_method != Http.GET:
-            self.send_response(405, "METHOD NOT SUPPORTED")
-            self.end_headers()
-            return
-
-        token = get_token()
-        if not token:
-            self.send_response(500, "FAILED")
-            self.end_headers()
-            return
-
-        api_resp = requests.get(
-            "https://www.googleapis.com/drive/v3/drives",
-            headers={"Authorization": f"Bearer {token}"},
-        )
-
-        assert api_resp.status_code == 200, api_resp.text
-
-        self.send_response(200, "OK")
-        self.send_header("Content-Type", "text/html")
-        self.end_headers()
-
-        drives = api_resp.json()["drives"]
-        drives_html = "\n".join(
-            f'<p><a href="/d/{d["id"]}">{d["name"]}</a></p>' for d in drives
-        )
-        html = page_html("GFlick Home", drives_html)
-        self.wfile.write(html.encode())
-
-    def serve_generate_slug(self, http_method: Http, file_id, file_name):
-        file_name = unquote(file_name)
-
-        if http_method != Http.GET:
-            self.send_response(405, "METHOD NOT SUPPORTED")
-            self.end_headers()
-            return
-
-        slug = db.get_or_create_link(file_id)
-
-        self.send_response(200, "OK")
-        self.send_header("Content-Type", "text/html")
-        self.end_headers()
-        self.wfile.write(
-            page_html(
-                "View file",
-                "<div>This is a <strong>publicly accessible</strong> direct link:</div>"
-                f'<a href="/v/{slug}/{quote(file_name)}">{file_name}</a>',
-            ).encode()
-        )
-
-        # self.send_response(303, "See Other")
-        # self.send_header("Location", f"/v/{slug}/{file_name}")
-        # self.end_headers()
-
-    def serve_video(self, http_method: Http, video_slug):
-        if http_method not in [Http.GET, Http.HEAD]:
-            self.send_response(405, "METHOD NOT SUPPORTED")
-            self.end_headers()
-            return
-
-        file_id = db.get_file_id(video_slug)
-        if not file_id:
-            self.send_response(404, "Nothing to see here.")
-            self.end_headers()
-            return
-
-        print(f"{http_method} request headers:")
-        for k, v in self.headers.items():
-            print(f"  {k}: {v}")
-
-        token = get_token()
-
-        if not token:
-            self.send_response(500, "FAILED")
-            self.end_headers()
-            return
-
-        req_headers = {}
-        req_headers["Authorization"] = f"Bearer {token}"
-        if "Range" in self.headers:
-            req_headers["Range"] = self.headers["Range"]
-
-        url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
-
-        if http_method == Http.GET:
-            request_func = requests.get
-        elif http_method == Http.HEAD:
-            request_func = requests.head
-
-        with closing(request_func(url, headers=req_headers, stream=True)) as vid_resp:
-            if vid_resp.status_code != 200:
-                self.send_response(vid_resp.status_code, "FAILED")
-            else:
-                self.send_response(200, "OK")
-                # VLC android won't allow seeking if accept-ranges isn't found (?)
-                self.send_header("Accept-Ranges", "bytes")
-
-            for hkey, hval in vid_resp.headers.items():
-                # The http library (urllib3) already "unchunked" the response stream,
-                # so forwarding `Transfer-Encoding: chunked` as-is to end user will
-                # result in error. Therefore, let's skip it:
-                if (hkey, hval) == ("Transfer-Encoding", "chunked"):
-                    print("Skipped", hkey, hval)
-                    continue
-                self.send_header(hkey, hval)
-
-            self.end_headers()
-
-            if http_method == Http.HEAD:
-                return
-
-            # is GET request => let's stream response body
-            try:
-                for chunk in vid_resp.raw.stream(CHUNK_SIZE):
-                    self.wfile.write(chunk)
-            except (ConnectionResetError, BrokenPipeError):
-                print(f"Client '{self.headers.get('User-Agent', '')}' aborted request")
-
-    def serve_login_form(self, method):
-        if method in (Http.GET, Http.HEAD):
-            self.send_response(200, "OK")
-            self.send_header("Content-Type", "text/html")
-            self.end_headers()
-            if method == Http.GET:
-                self.wfile.write(
-                    page_html(
-                        title="Login first!",
-                        body="""
-<form action="/login" method="post">
-    <label for="name">Enter password:</label>
-    <input type="password" name="password" id="password" required autofocus />
-    <input type="submit" value="Login" />
-</form>""",
-                    ).encode()
-                )
-
-        elif method == Http.POST:
-            content_len = int(self.headers.get("Content-Length"))
-            post_body = self.rfile.read(content_len).decode()
-            try:
-                password = parse_qs(post_body)["password"][0]
-                assert password == USER_PASSWORD
-            except Exception:
-                self.send_response(400, "Invalid password")
-                self.send_header("Content-Type", "text/plain")
-                self.end_headers()
-                import traceback
-
-                traceback.print_exc()
-                self.wfile.write("Invalid password".encode())
-
-                # Prevents lazy brute force attacks,
-                # Probably not effective until proper rate limiting is implemented.
-                time.sleep(5)
-                return
-
-            # Password is correct!
-            self.send_response(302, "Invalid password")
-            self.send_header("Set-Cookie", f"user_token={USER_TOKEN}; Path=/")
-            self.send_header("Location", "/")
-            self.end_headers()
-
-    # ROUTING LOGIC FOLLOWS
-
-    routes = {
-        re.compile(r"^/slug/([\w\-]+)/(.+)/?$"): serve_generate_slug,
-        re.compile(r"^/v/([\w\-]+)/.+/?$"): serve_video,
-        re.compile(r"^/$"): serve_drives,
-        re.compile(r"^/d/([\w\-]+)/?$"): serve_drive,
-        re.compile(r"^/d/([\w\-]+)/([\w\-]+)/?$"): serve_drive,
-        re.compile(r"^/login/?$"): serve_login_form,
-    }
-
-    def route(self, http_method: Http):
-        assert http_method in [Http.GET, Http.HEAD, Http.POST]
-
-        if not self.path.startswith("/v/") and not self.check_auth():
-            return
-
-        for pattern, handler in self.routes.items():
-            match = pattern.match(self.path)
-            if match:
-                handler(self, http_method, *match.groups())
-                return True
-
-        self.send_response(404, "NOT FOUND")
-        self.end_headers()
-
-        if http_method == Http.GET:
-            self.wfile.write(b"Route not found")
-
-    def do_GET(self):
-        self.route(Http.GET)
-
-    def do_HEAD(self):
-        self.route(Http.HEAD)
-
-    def do_POST(self):
-        self.route(Http.POST)
-
-    def check_auth(self):
-        cookie = SimpleCookie()
-        cookie.load(self.headers.get("cookie", ""))
-
-        token = cookie.get("user_token")
-
-        if (not token or token.value != USER_TOKEN) and not self.path.startswith(
-            "/login"
-        ):
-            self.send_response(302, "Moved Temporarily")
-            self.send_header("Location", "/login")
-            self.send_header("Set-Cookie", "user_token=; Path=/")
-            self.end_headers()
-            return False
-
-        return True
+    drives = api_resp.json()["drives"]
+    drives_html = "\n".join(
+        f'<p><a href="/d/{d["id"]}">{d["name"]}</a></p>' for d in drives
+    )
+    html = page_html("GFlick Home", drives_html)
+    return html
 
 
-def run(server_class=ThreadingHTTPServer, handler_class=Handler):
-    db.init()
-    db.delete_old_links()
+@route("/slug/<file_id>/<file_name>", method="GET")
+def view_slug(file_id, file_name):
+    file_name = unquote(file_name)
 
-    server_address = ("", PORT)
-    httpd = server_class(server_address, handler_class)
-    httpd.serve_forever()
+    slug = db.get_or_create_link(file_id)
+
+    html = page_html(
+        "View file",
+        "<div>This is a <strong>publicly accessible</strong> direct link:</div>"
+        f'<a href="/v/{slug}/{quote(file_name)}">{file_name}</a>',
+    )
+    return html
 
 
-print(f"Running at port {PORT}")
-run()
+@route("/v/<file_slug>/<file_name>", method=["GET", "HEAD"])
+def view_video(file_slug, file_name):
+    file_id = db.get_file_id(file_slug)
+    if not file_id:
+        return HTTPError(404, "Nothing to see here.")
+
+    print(f"{request.method} request headers:")
+    for k, v in request.headers.items():
+        print(f"  {k}: {v}")
+
+    token = get_token()
+    if not token:
+        return HTTPError(500, "FAILED")
+
+    req_headers = {}
+    req_headers["Authorization"] = f"Bearer {token}"
+    if "Range" in request.headers:
+        req_headers["Range"] = request.headers["Range"]
+
+    url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
+
+    if request.method == "GET":
+        request_func = requests_get
+    elif request.method == "HEAD":
+        request_func = requests_head
+
+    with closing(request_func(url, headers=req_headers, stream=True)) as vid_resp:
+        gflick_resp_headers = {}
+
+        if vid_resp.status_code != 200:
+            return HTTPError(vid_resp.status_code, "FAILED")
+        else:
+            # VLC android won't allow seeking if accept-ranges isn't found (?)
+            gflick_resp_headers["Accept-Ranges"] = "bytes"
+
+        for hkey, hval in vid_resp.headers.items():
+            # The http library (urllib3) already "unchunked" the response stream,
+            # so forwarding `Transfer-Encoding: chunked` as-is to end user will
+            # result in error. Therefore, let's skip it:
+            if (hkey, hval) == ("Transfer-Encoding", "chunked"):
+                print("Skipped", hkey, hval)
+                continue
+            gflick_resp_headers[hkey] = hval
+
+        if request.method == "HEAD":
+            return HTTPResponse(200, headers=gflick_resp_headers)
+
+        # is GET request => let's stream response body
+        response.headers = gflick_resp_headers
+        try:
+            for chunk in vid_resp.raw.stream(CHUNK_SIZE):
+                yield chunk
+
+        except (ConnectionResetError, BrokenPipeError):
+            print(f"Client '{request.headers.get('User-Agent', '')}' aborted request")
+
+
+@route("/d/<drive_id>", method="GET")
+@route("/d/<drive_id>/<folder_id>", method="GET")
+def view_drive(drive_id, folder_id=None):
+    token = get_token()
+    if not token:
+        return HTTPError(500, "FAILED")
+
+    parent = folder_id or drive_id
+    api_resp = requests_get(
+        "https://www.googleapis.com/drive/v3/files",
+        params={
+            "q": f"'{parent}' in parents",
+            "fields": "files(id,name,mimeType,thumbnailLink)",
+            "driveId": drive_id,
+            "corpora": "drive",
+            "includeItemsFromAllDrives": True,
+            "supportsAllDrives": True,
+            "orderBy": "folder,name,createdTime desc",
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert api_resp.status_code == 200, api_resp.text
+
+    files = api_resp.json()["files"]
+    files_html = "\n".join(file_html(drive_id, d) for d in files)
+    html = page_html(title=parent, body=files_html)
+    return html
+
+
+@route("/login", method=["GET", "POST"])
+def view_login():
+    pass
+
+
+def run_dev():
+    gunicorn_kwargs = {"workers": 5, "reload": True}
+    run(server="gunicorn", host="localhost", port=8000, **gunicorn_kwargs)
+
+
+def run_prod():
+    gunicorn_kwargs = {"workers": 5}
+    run(server="gunicorn", host="localhost", port=8000, **gunicorn_kwargs)

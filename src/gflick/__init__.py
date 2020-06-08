@@ -1,7 +1,13 @@
-def server():
-    from .server import run
+def prod():
+    from .server import run_prod
 
-    run()
+    run_prod()
+
+
+def dev():
+    from .server import run_dev
+
+    run_dev()
 
 
 def google():
