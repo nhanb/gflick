@@ -27,7 +27,6 @@ ACCESS_TOKEN = None
 
 USER_PASSWORD = tokens["user_password"]
 USER_TOKEN = secrets.token_urlsafe(128)
-VIDEO_TOKEN = secrets.token_urlsafe(128)
 
 
 def get_access_token(clientId: str, clientSecret: str, refreshToken: str) -> str:
