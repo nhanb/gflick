@@ -6,6 +6,8 @@ html {
 p {
   background-color: #eee;
   padding: 0.5em;
-  border: 2px solid black;
+  border: 1px solid #ccc;
+  border-radius: 2px;
   overflow-wrap: break-word;
+  margin: 0 0 0.8em 0;
 }
