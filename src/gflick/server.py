@@ -2,12 +2,14 @@ import json
 import secrets
 import time
 from string import Template
-from urllib.parse import quote, unquote
+from urllib.parse import parse_qs, quote, unquote
 
 import httpx
 import requests
 from starlette.applications import Starlette
-from starlette.responses import Response, StreamingResponse
+from starlette.middleware import Middleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import RedirectResponse, Response, StreamingResponse
 from starlette.routing import Route
 
 from . import db
@@ -250,8 +252,54 @@ async def view_drive(req):
     return Response(html)
 
 
-async def view_login(req):
-    pass
+async def view_login_get(req):
+    return Response(
+        page_html(
+            title="Login first!",
+            body="""
+        <form action="/login" method="post">
+            <label for="name">Enter password:</label>
+            <input type="password" name="password" id="password" required autofocus />
+            <input type="submit" value="Login" />
+        </form>""",
+        )
+    )
+
+
+async def view_login_post(req):
+    # Manual parsing instead of using req.form() because that would require installing
+    # some python-multipart lib even if we're parsing a urlencoded form (?!)
+    body = (await req.body()).decode()
+    form = parse_qs(body)
+    password_list = form.get("password")
+    password = password_list[0] if password_list else None
+    if not password or password != USER_PASSWORD:
+        return Response("Invalid password", status_code=500)
+
+    # Password is correct!
+    response = RedirectResponse("/", status_code=302)
+    response.set_cookie("user_token", USER_TOKEN)
+    return response
+
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        """
+        Redirect to /login if user_token cookie is not present or invalid,
+        with the exception of:
+            /login: otherwise, we'll end up with infinite redirects
+            /v/*: we do want to expose this one publicly
+        """
+        if request.url.path != "/login" and not request.url.path.startswith("/v/"):
+            user_token = request.cookies.get("user_token")
+            if not user_token or user_token != USER_TOKEN:
+                response = RedirectResponse("/login", status_code=302)
+                response.delete_cookie("user_token")
+                return response
+
+        # Otherwise, business as usual
+        response = await call_next(request)
+        return response
 
 
 app = Starlette(
@@ -262,7 +310,9 @@ app = Starlette(
         Route("/v/{video_slug}/{file_name}", view_video, methods=["GET", "HEAD"]),
         Route("/d/{drive_id}", view_drive),
         Route("/d/{drive_id}/{folder_id}", view_drive),
-        Route("/login", view_login),
+        Route("/login", view_login_get),
+        Route("/login", view_login_post, methods=["POST"]),
     ],
+    middleware=[Middleware(AuthMiddleware)],
 )
 app.state.client = httpx.AsyncClient()
