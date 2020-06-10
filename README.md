@@ -4,8 +4,12 @@ Gflick lets me play video files straight from my Google Drive without
 downloading the whole thing ahead of time.
 Subtitles/audio tracks and seek work out of the box.
 
-- [Demo here](https://junk.imnhan.com/gflick.mp4)
-- [Youtube mirror](https://youtu.be/MzHS8l6-61I)
+[Demo here](https://junk.imnhan.com/gflick-phone-demo.mp4)
+
+Motivations and design decisions are explained in my blog posts:
+
+- [Towards an acceptable video playing experience][1]
+- [Streaming videos from Google Drive - 2nd attempt][2]
 
 # How?
 
@@ -17,23 +21,26 @@ header](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Range).
 
 # Running it
 
-This originally started as a quick and dirty SimpleHTTPServer proof-of-concept
-and is now in the progress of being ported to run on bottle + gunicorn for some
-semblance of sanity. Maybe check back later if you want to actually use it.
-
-The following are notes for my own use which are probably out of sync with the
-codebase's reality. I'll eventually clean them up. Maybe.
-
 You need to first create an oauth client from console.developers.google.com,
 then:
 
 ```sh
-poetry install
+pip install gflick
 gflick-google
 # Follow the script's instructions to authorize your newly created client.
 # Once that's done, tokens.json will be created, which will be used by server.py.
-echo server.py | entr -r gflick-dev
+gflick
 # Visit http://localhost:8000
+```
+
+For developers:
+
+```sh
+git clone https://github.com/nhanb/gflick.git
+cd gflick
+poetry install
+gflick-google
+gflick-dev
 ```
 
 # Running on a publicly accessible server
@@ -68,6 +75,10 @@ systemctl start gflick
 # Then:
 mkdir /etc/caddy/sites-enabled/
 cp /home/gflick/gflick/caddy/gflick /etc/caddy/sites-enabled/gflick
+# [ edit gflick file to point to your domain instead ]
 # [ edit /etc/caddy/Caddyfile to simply say `import sites-enabled/*` ]
 systemctl enable caddy
 systemctl start caddy
+
+[1]: https://hi.imnhan.com/posts/towards-an-acceptable-video-playing-experience/
+[2]: https://hi.imnhan.com/posts/streaming-videos-from-google-drive-2nd-attempt/

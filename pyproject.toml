@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "gflick"
-version = "0.1.0"
+version = "0.1.1"
 description = ""
 authors = ["Bùi Thành Nhân <hi@imnhan.com>"]
 license = "MIT"
@@ -11,7 +11,7 @@ gflick-dev = "gflick:dev"
 gflick-google = "gflick:google"
 
 [tool.poetry.dependencies]
-python = "^3.7"
+python = "^3.6"
 starlette = "^0.13.4"
 uvicorn = "^0.11.5"
 httpx = "^0.13.3"

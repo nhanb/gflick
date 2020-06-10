@@ -1,4 +1,5 @@
 import json
+import os
 import secrets
 import time
 from string import Template
@@ -118,6 +119,7 @@ html_template_str = f"""
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>$title</title>
+    <link rel="shortcut icon" href="data:image/x-icon;," type="image/x-icon" />
 </head>
 <body>
     $body
@@ -305,8 +307,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
         return response
 
 
+debug = os.environ.get("GFLICK_DEBUG") == "1"
+print("Debug mode:", debug)
+
 app = Starlette(
-    debug=True,
+    debug=debug,
     routes=[
         Route("/", view_index),
         Route("/slug/{file_id}/{file_name}", view_slug),
