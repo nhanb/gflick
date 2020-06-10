@@ -106,13 +106,7 @@ def file_html(drive_id, data):
         return f'<p><a href="/slug/{data["id"]}/{filename}">{inner_text}</a></p>'
 
 
-js = ""
-css = ""
-with open("script.js", "r") as jsfile:
-    js = jsfile.read()
-with open("style.css", "r") as cssfile:
-    css = cssfile.read()
-html_template_str = f"""
+html_template_str = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -121,26 +115,30 @@ html_template_str = f"""
     <title>$title</title>
     <link rel="shortcut icon" href="data:image/x-icon;," type="image/x-icon" />
 </head>
-<body>
-    $body
-</body>
-<script>
-$server_provided_js
-{js}
-</script>
-<style>{css}</style>
+
+<body>$body</body>
+
+<style>
+html {
+  font-size: 100%;
+  line-height: 1.5em;
+}
+
+p {
+  background-color: #eee;
+  padding: 0.5em;
+  border: 1px solid #ccc;
+  border-radius: 2px;
+  overflow-wrap: break-word;
+  margin: 0 0 0.8em 0;
+}
+</style>
 </html>
 """
 
 
-def page_html(title, body, username="", password=""):
-    server_provided_js = f"""
-    const username = '{username}';
-    const password = '{password}';
-    """
-    return Template(html_template_str).substitute(
-        title=title, body=body, js=js, css=css, server_provided_js=server_provided_js
-    )
+def page_html(title, body):
+    return Template(html_template_str).substitute(title=title, body=body)
 
 
 async def view_index(req):
