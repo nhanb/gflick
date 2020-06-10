@@ -1,13 +1,19 @@
 def prod():
-    from .server import run_prod
+    from gflick import db
+    import uvicorn
 
-    run_prod()
+    db.init()
+    uvicorn.run("gflick.server:app", host="127.0.0.1", port=8000, log_level="info")
 
 
 def dev():
-    from .server import run_dev
+    from gflick import db
+    import uvicorn
 
-    run_dev()
+    db.init()
+    uvicorn.run(
+        "gflick.server:app", host="127.0.0.1", port=8000, log_level="info", reload=True
+    )
 
 
 def google():

@@ -1,15 +1,14 @@
 import json
 import secrets
 import time
-from contextlib import closing
 from string import Template
 from urllib.parse import quote, unquote
 
-from bottle import HTTPError, HTTPResponse, request, response, route, run
-# Explicit names so I don't mistake between `requests` and bottle's `request`
-from requests import get as requests_get
-from requests import head as requests_head
-from requests import post as requests_post
+import httpx
+import requests
+from starlette.applications import Starlette
+from starlette.responses import Response, StreamingResponse
+from starlette.routing import Route
 
 from . import db
 
@@ -30,7 +29,7 @@ def get_access_token(clientId: str, clientSecret: str, refreshToken: str) -> str
     print("Refreshing access token")
     start_time = time.time()
 
-    r = requests_post(
+    r = requests.post(
         "https://www.googleapis.com/oauth2/v4/token",
         headers={"Accept": "application/json"},
         data={
@@ -137,13 +136,12 @@ def page_html(title, body, username="", password=""):
     )
 
 
-@route("/", method="GET")
-def view_index():
+async def view_index(req):
     token = get_token()
     if not token:
-        return HTTPError(500, "FAILED")
+        return Response("FAILED", status_code=500)
 
-    api_resp = requests_get(
+    api_resp = requests.get(
         "https://www.googleapis.com/drive/v3/drives",
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -153,90 +151,84 @@ def view_index():
         f'<p><a href="/d/{d["id"]}">{d["name"]}</a></p>' for d in drives
     )
     html = page_html("GFlick Home", drives_html)
-    return html
+    return Response(html)
 
 
-@route("/slug/<file_id>/<file_name>", method="GET")
-def view_slug(file_id, file_name):
-    file_name = unquote(file_name)
-
-    slug = db.get_or_create_link(file_id)
+async def view_slug(req):
+    file_name = unquote(req.path_params["file_name"])
+    slug = db.get_or_create_link(req.path_params["file_id"])
 
     html = page_html(
         "View file",
         "<div>This is a <strong>publicly accessible</strong> direct link:</div>"
         f'<a href="/v/{slug}/{quote(file_name)}">{file_name}</a>',
     )
-    return html
+    return Response(html)
 
 
-@route("/v/<file_slug>/<file_name>", method=["GET", "HEAD"])
-def view_video(file_slug, file_name):
-    file_id = db.get_file_id(file_slug)
+async def view_video(req):
+    file_id = db.get_file_id(req.path_params["video_slug"])
     if not file_id:
-        return HTTPError(404, "Nothing to see here.")
+        return Response("FAILED", status_code=500)
 
-    print(f"{request.method} request headers:")
-    for k, v in request.headers.items():
+    print(f"{req.method} request headers:")
+    for k, v in req.headers.items():
         print(f"  {k}: {v}")
 
     token = get_token()
     if not token:
-        return HTTPError(500, "FAILED")
+        return Response("FAILED", status_code=500)
 
     req_headers = {}
     req_headers["Authorization"] = f"Bearer {token}"
-    if "Range" in request.headers:
-        req_headers["Range"] = request.headers["Range"]
+    if "range" in req.headers:
+        req_headers["Range"] = req.headers["range"]
 
     url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
 
-    if request.method == "GET":
-        request_func = requests_get
-    elif request.method == "HEAD":
-        request_func = requests_head
-
-    with closing(request_func(url, headers=req_headers, stream=True)) as vid_resp:
-        gflick_resp_headers = {}
-
-        if vid_resp.status_code != 200:
-            return HTTPError(vid_resp.status_code, "FAILED")
-        else:
-            # VLC android won't allow seeking if accept-ranges isn't found (?)
-            gflick_resp_headers["Accept-Ranges"] = "bytes"
-
-        for hkey, hval in vid_resp.headers.items():
-            # The http library (urllib3) already "unchunked" the response stream,
-            # so forwarding `Transfer-Encoding: chunked` as-is to end user will
-            # result in error. Therefore, let's skip it:
-            if (hkey, hval) == ("Transfer-Encoding", "chunked"):
-                print("Skipped", hkey, hval)
-                continue
-            gflick_resp_headers[hkey] = hval
-
-        if request.method == "HEAD":
-            return HTTPResponse(200, headers=gflick_resp_headers)
-
-        # is GET request => let's stream response body
-        for hkey, hval in gflick_resp_headers.items():
-            response.headers.replace(hkey, hval)
-        try:
-            for chunk in vid_resp.raw.stream(CHUNK_SIZE):
+    async def metadata_then_body():
+        """
+        First yield tuple(status_code, headers)
+        Then yield chunks of response body
+        """
+        async with req.app.state.client.stream(
+            req.method, url, headers=req_headers
+        ) as vid_resp:
+            yield (vid_resp.status_code, vid_resp.headers)
+            async for chunk in vid_resp.aiter_raw():
                 yield chunk
 
-        except (ConnectionResetError, BrokenPipeError):
-            print(f"Client '{request.headers.get('User-Agent', '')}' aborted request")
+    video = metadata_then_body()
+    status_code, headers = await video.__anext__()  # just fucking end me
+
+    if not 200 <= status_code <= 299:  # known success codes: 200, 206
+        return Response(
+            f"Unexpected response status from Google: {status_code}", status_code=500
+        )
+
+    # VLC android won't allow seeking if accept-ranges isn't found (?)
+    headers["Accept-Ranges"] = "bytes"
+
+    if req.method == "HEAD":
+        return Response(b"", status_code=status_code, headers=headers)
+
+    print("Response Headers:")
+    for key, val in headers.items():
+        print(">", key, ":", val)
+
+    return StreamingResponse(video, headers=headers, status_code=status_code)
 
 
-@route("/d/<drive_id>", method="GET")
-@route("/d/<drive_id>/<folder_id>", method="GET")
-def view_drive(drive_id, folder_id=None):
+async def view_drive(req):
+    drive_id = req.path_params["drive_id"]
+    folder_id = req.path_params.get("folder_id")
+
     token = get_token()
     if not token:
-        return HTTPError(500, "FAILED")
+        return Response("FAILED", status_code=500)
 
     parent = folder_id or drive_id
-    api_resp = requests_get(
+    api_resp = requests.get(
         "https://www.googleapis.com/drive/v3/files",
         params={
             "q": f"'{parent}' in parents",
@@ -255,19 +247,22 @@ def view_drive(drive_id, folder_id=None):
     files = api_resp.json()["files"]
     files_html = "\n".join(file_html(drive_id, d) for d in files)
     html = page_html(title=parent, body=files_html)
-    return html
+    return Response(html)
 
 
-@route("/login", method=["GET", "POST"])
-def view_login():
+async def view_login(req):
     pass
 
 
-def run_dev():
-    gunicorn_kwargs = {"workers": 5, "reload": True, "debug": True}
-    run(server="gunicorn", host="localhost", port=8000, **gunicorn_kwargs)
-
-
-def run_prod():
-    gunicorn_kwargs = {"workers": 5}
-    run(server="gunicorn", host="localhost", port=8000, **gunicorn_kwargs)
+app = Starlette(
+    debug=True,
+    routes=[
+        Route("/", view_index),
+        Route("/slug/{file_id}/{file_name}", view_slug),
+        Route("/v/{video_slug}/{file_name}", view_video, methods=["GET", "HEAD"]),
+        Route("/d/{drive_id}", view_drive),
+        Route("/d/{drive_id}/{folder_id}", view_drive),
+        Route("/login", view_login),
+    ],
+)
+app.state.client = httpx.AsyncClient()
