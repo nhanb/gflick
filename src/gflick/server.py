@@ -5,7 +5,6 @@ from string import Template
 from urllib.parse import parse_qs, quote, unquote
 
 import httpx
-import requests
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -27,11 +26,13 @@ USER_PASSWORD = tokens["user_password"]
 USER_TOKEN = secrets.token_urlsafe(128)
 
 
-def get_access_token(clientId: str, clientSecret: str, refreshToken: str) -> str:
+async def get_access_token(
+    httpx_client, clientId: str, clientSecret: str, refreshToken: str
+) -> str:
     print("Refreshing access token")
     start_time = time.time()
 
-    r = requests.post(
+    r = await httpx_client.post(
         "https://www.googleapis.com/oauth2/v4/token",
         headers={"Accept": "application/json"},
         data={
@@ -56,7 +57,7 @@ def get_access_token(clientId: str, clientSecret: str, refreshToken: str) -> str
     return token, expiration
 
 
-def get_token():
+async def get_token(httpx_client):
     """
     Refreshes token if not set or about to expire.
     Returns usable token if succeeded, otherwise None.
@@ -78,7 +79,9 @@ def get_token():
             print(f"Reusing token {token[:15]}[...]")
 
     if should_refresh:
-        token, expiration = get_access_token(CLIENT_ID, CLIENT_SECRET, REFRESH_TOKEN)
+        token, expiration = await get_access_token(
+            httpx_client, CLIENT_ID, CLIENT_SECRET, REFRESH_TOKEN
+        )
         if token:
             db.keyval_set(
                 "gdrive_access_token",
@@ -139,11 +142,11 @@ def page_html(title, body, username="", password=""):
 
 
 async def view_index(req):
-    token = get_token()
+    token = await get_token(req.app.state.httpx_client)
     if not token:
         return Response("FAILED", status_code=500)
 
-    api_resp = requests.get(
+    api_resp = await req.app.state.httpx_client.get(
         "https://www.googleapis.com/drive/v3/drives",
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -177,7 +180,7 @@ async def view_video(req):
     for k, v in req.headers.items():
         print(f"  {k}: {v}")
 
-    token = get_token()
+    token = await get_token(req.app.state.httpx_client)
     if not token:
         return Response("FAILED", status_code=500)
 
@@ -193,7 +196,7 @@ async def view_video(req):
         First yield tuple(status_code, headers)
         Then yield chunks of response body
         """
-        async with req.app.state.client.stream(
+        async with req.app.state.httpx_client.stream(
             req.method, url, headers=req_headers
         ) as vid_resp:
             yield (vid_resp.status_code, vid_resp.headers)
@@ -225,12 +228,12 @@ async def view_drive(req):
     drive_id = req.path_params["drive_id"]
     folder_id = req.path_params.get("folder_id")
 
-    token = get_token()
+    token = await get_token(req.app.state.httpx_client)
     if not token:
         return Response("FAILED", status_code=500)
 
     parent = folder_id or drive_id
-    api_resp = requests.get(
+    api_resp = await req.app.state.httpx_client.get(
         "https://www.googleapis.com/drive/v3/files",
         params={
             "q": f"'{parent}' in parents",
@@ -315,4 +318,4 @@ app = Starlette(
     ],
     middleware=[Middleware(AuthMiddleware)],
 )
-app.state.client = httpx.AsyncClient()
+app.state.httpx_client = httpx.AsyncClient()

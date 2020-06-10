@@ -6,7 +6,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlencode, urlparse
 
-import requests
+import httpx
 
 """
 Helper script to quickly get user consent for GDrive API access.
@@ -105,7 +105,7 @@ def get_initial_tokens(authorization_code, redirect_port):
         "grant_type": "authorization_code",
         "redirect_uri": f"http://127.0.0.1:{redirect_port}",
     }
-    resp = requests.post(endpoint, data=params)
+    resp = httpx.post(endpoint, data=params)
     assert resp.status_code == 200, f"Failed to get initial tokens: {resp.text}"
 
     resp_json = resp.json()
@@ -123,7 +123,7 @@ def get_access_token(refresh_token):
         "refresh_token": refresh_token,
         "grant_type": "refresh_token",
     }
-    resp = requests.post(endpoint, data=params)
+    resp = httpx.post(endpoint, data=params)
     assert resp.status_code == 200, "Failed to get access token"
 
     resp_json = resp.json()
