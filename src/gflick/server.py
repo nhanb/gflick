@@ -9,6 +9,7 @@ from urllib.parse import quote, unquote
 from bottle import (
     HTTPError,
     HTTPResponse,
+    debug,
     default_app,
     hook,
     request,
@@ -331,5 +332,7 @@ def authenticate():
             raise response
 
 
+debug_flag = os.environ.get("GFLICK_DEBUG") == "1"
+debug(debug_flag)
+
 app = default_app()
-app.config["debug"] = os.environ.get("GFLICK_DEBUG") == "1"
