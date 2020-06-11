@@ -5,11 +5,12 @@ from contextlib import closing
 from string import Template
 from urllib.parse import quote, unquote
 
-from bottle import HTTPError, HTTPResponse, request, response, route, run
 # Explicit names so I don't mistake between `requests` and bottle's `request`
 from requests import get as requests_get
 from requests import head as requests_head
 from requests import post as requests_post
+
+from bottle import HTTPError, HTTPResponse, request, response, route, run
 
 from . import db
 
@@ -101,13 +102,7 @@ def file_html(drive_id, data):
         return f'<p><a href="/slug/{data["id"]}/{filename}">{inner_text}</a></p>'
 
 
-js = ""
-css = ""
-with open("script.js", "r") as jsfile:
-    js = jsfile.read()
-with open("style.css", "r") as cssfile:
-    css = cssfile.read()
-html_template_str = f"""
+html_template_str = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -119,22 +114,28 @@ html_template_str = f"""
     $body
 </body>
 <script>
-$server_provided_js
-{js}
 </script>
-<style>{css}</style>
+<style>
+html {
+  font-size: 100%;
+  line-height: 1.5em;
+}
+
+p {
+  background-color: #eee;
+  padding: 0.5em;
+  border: 1px solid #ccc;
+  border-radius: 2px;
+  overflow-wrap: break-word;
+  margin: 0 0 0.8em 0;
+}
+</style>
 </html>
 """
 
 
-def page_html(title, body, username="", password=""):
-    server_provided_js = f"""
-    const username = '{username}';
-    const password = '{password}';
-    """
-    return Template(html_template_str).substitute(
-        title=title, body=body, js=js, css=css, server_provided_js=server_provided_js
-    )
+def page_html(title, body):
+    return Template(html_template_str).substitute(title=title, body=body)
 
 
 @route("/", method="GET")
@@ -201,9 +202,9 @@ def view_video(file_slug, file_name):
 
         if not 200 <= vid_resp.status_code <= 299:  # known cases: 200, 206
             return HTTPError(vid_resp.status_code, "FAILED")
-        else:
-            # VLC android won't allow seeking if accept-ranges isn't found (?)
-            gflick_resp_headers["Accept-Ranges"] = "bytes"
+
+        # VLC android won't allow seeking if accept-ranges isn't found (?)
+        gflick_resp_headers["Accept-Ranges"] = "bytes"
 
         for hkey, hval in vid_resp.headers.items():
             # The http library (urllib3) already "unchunked" the response stream,
