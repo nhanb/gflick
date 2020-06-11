@@ -5,12 +5,11 @@ from contextlib import closing
 from string import Template
 from urllib.parse import quote, unquote
 
+from bottle import HTTPError, HTTPResponse, hook, request, response, route, run
 # Explicit names so I don't mistake between `requests` and bottle's `request`
 from requests import get as requests_get
 from requests import head as requests_head
 from requests import post as requests_post
-
-from bottle import HTTPError, HTTPResponse, request, response, route, run
 
 from . import db
 
@@ -109,6 +108,7 @@ html_template_str = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>$title</title>
+    <link rel="shortcut icon" href="data:image/x-icon;," type="image/x-icon" />
 </head>
 <body>
     $body
@@ -216,7 +216,7 @@ def view_video(file_slug, file_name):
             gflick_resp_headers[hkey] = hval
 
         if request.method == "HEAD":
-            return HTTPResponse(200, headers=gflick_resp_headers)
+            return HTTPResponse(status=200, headers=gflick_resp_headers)
 
         # is GET request => let's stream response body
         for hkey, hval in gflick_resp_headers.items():
@@ -259,9 +259,45 @@ def view_drive(drive_id, folder_id=None):
     return html
 
 
-@route("/login", method=["GET", "POST"])
-def view_login():
-    pass
+@route("/login", method="GET")
+def view_login_get():
+    return page_html(
+        title="Login first!",
+        body="""
+        <form action="/login" method="post">
+        <label for="name">Enter password:</label>
+        <input type="password" name="password" id="password" required autofocus />
+        <input type="submit" value="Login" />
+        </form>""",
+    )
+
+
+@route("/login", method="POST")
+def view_login_post():
+    password = request.forms.get("password")
+    if not password or password != USER_PASSWORD:
+        return HTTPError(500, "Invalid password")
+
+    # Password is correct!
+    response = HTTPResponse(status=302, headers={"Location": "/"})
+    response.set_cookie("user_token", USER_TOKEN)
+    return response
+
+
+@hook("before_request")
+def authenticate():
+    """
+    Redirect to /login if user_token cookie is not present or invalid,
+    with the exception of:
+        /login: otherwise, we'll end up with infinite redirects
+        /v/*: we do want to expose this one publicly
+    """
+    if request.path != "/login" and not request.path.startswith("/v/"):
+        user_token = request.cookies.get("user_token")
+        if not user_token or user_token != USER_TOKEN:
+            response = HTTPResponse(status=302, headers={"Location": "/login"})
+            response.delete_cookie("user_token")
+            raise response
 
 
 def run_dev():
