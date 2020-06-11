@@ -1,9 +1,14 @@
 import secrets
 import sqlite3
 
+# Since we're running in single-threaded async mode,
+# keeping a global sqlite3 connection is (probably) fine.
+_conn = None
+
 
 def get_conn():
-    return sqlite3.connect("db.sqlite3")
+    global _conn
+    return _conn or sqlite3.connect("db.sqlite3")
 
 
 def run_sql(*args):
@@ -13,8 +18,18 @@ def run_sql(*args):
         cur.execute(*args)
         lastrowid = cur.lastrowid
         results = cur.fetchall()
-    conn.close()
-    return results, lastrowid
+        return results, lastrowid
+
+
+def run_sqls(*args_list):
+    conn = get_conn()
+    with conn:
+        cur = conn.cursor()
+        for args in args_list:
+            cur.execute(*args)
+        lastrowid = cur.lastrowid
+        results = cur.fetchall()
+        return results, lastrowid
 
 
 def init():
@@ -88,12 +103,10 @@ def delete_old_links():
 
 
 def keyval_set(key, val):
-    run_sql(
-        """
-        INSERT INTO key_val (key, val) VALUES (?, ?)
-        ON CONFLICT(key) DO UPDATE SET val=excluded.val;
-        """,
-        (key, val),
+    # can't use upsert here because sqlite3 on Ubuntu 18 is ancient...
+    run_sqls(
+        ["DELETE FROM key_val WHERE key=?;", (key,)],
+        ["INSERT INTO key_val (key, val) VALUES (?, ?);", (key, val)],
     )
 
 
