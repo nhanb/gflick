@@ -79,8 +79,8 @@ secure = ["certifi", "cryptography (>=1.3.4)", "idna (>=2.0.0)", "pyOpenSSL (>=0
 socks = ["PySocks (>=1.5.6,<1.5.7 || >1.5.7,<2.0)"]
 
 [metadata]
-content-hash = "67d8671cc3841242e0e20503cc10c99dcf02354d22498130735556a51fc1fe16"
-python-versions = "^3.7"
+content-hash = "0f31228efe1b2f6b911141e08d3ecf2dbc11f04414b62925c991f2575fcd1dfe"
+python-versions = "^3.6"
 
 [metadata.files]
 bottle = [
