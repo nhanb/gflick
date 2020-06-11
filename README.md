@@ -4,8 +4,16 @@ Gflick lets me play video files straight from my Google Drive without
 downloading the whole thing ahead of time.
 Subtitles/audio tracks and seek work out of the box.
 
-- [Demo here](https://junk.imnhan.com/gflick.mp4)
-- [Youtube mirror](https://youtu.be/MzHS8l6-61I)
+[Demo here](https://junk.imnhan.com/gflick-phone-demo.mp4)
+
+Motivations and design decisions are explained in my blog posts:
+
+- [Towards an acceptable video playing experience][1]
+- [Streaming videos from Google Drive - 2nd attempt][2]
+
+After a [brief affair with async web frameworks][3], I got scared of the
+ridiculous performance overhead and went back to good ol' bottle + gunicorn,
+which does what I want and gets the hell out of the way.
 
 # How?
 
@@ -15,28 +23,33 @@ video players.
 Seeking and text/audio tracks work because the server supports [the `Range`
 header](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Range).
 
-# Running it
-
-This originally started as a quick and dirty SimpleHTTPServer proof-of-concept
-and is now in the progress of being ported to run on bottle + gunicorn for some
-semblance of sanity. Maybe check back later if you want to actually use it.
-
-The following are notes for my own use which are probably out of sync with the
-codebase's reality. I'll eventually clean them up. Maybe.
-
-You need to first create an oauth client from console.developers.google.com,
-then:
+# Development
 
 ```sh
 poetry install
 gflick-google
 # Follow the script's instructions to authorize your newly created client.
 # Once that's done, tokens.json will be created, which will be used by server.py.
-echo server.py | entr -r gflick-dev
+gflick-dev
 # Visit http://localhost:8000
 ```
 
-# Running on a publicly accessible server
+# Running it
+
+The `gflick` PyPI package installs a `gflick-prod` executable which can be run
+as-is, as long as the current running dir has a `tokens.json` file.
+
+There's also a `gflick-google` helper command that's supposed to be run on a
+desktop which will guide you the google oauth process and spit out said
+`tokens.json` file.
+
+```sh
+pip install --upgrade gflick
+# assuming you've already generated a tokens.json file in current dir
+gflick-prod
+```
+
+## Running it on a publicly accessible server
 
 This is a draft mostly for my personal use, but it may give you ideas. TL;DR:
 
@@ -48,17 +61,17 @@ The whole thing can be converted into an ansible playbook (and it should be).
 I'm just too lazy atm.
 
 ```sh
-apt install python3.7
+apt install python3  # at least 3.6
 adduser --disabled-password gflick
 chmod 0750 /home/gflick
 su gflick
-cd
-git clone https://github.com/nhanb/gflick.git
-
-# [write tokens.json]
+mkdir ~/gflick
+cd ~/gflick
+pip install --user --upgrade gflick
+# [scp your tokens.json file to /home/gflick/gflick/tokens.json]
 
 # as root:
-ln -s /home/gflick/gflick/systemd/gflick.service /etc/systemd/system/gflick.service
+# [populate /etc/systemd/system/gflick.service (see sample file in repo)]
 systemctl enable gflick
 systemctl start gflick
 # Site should now be live at port 8000, but not accessible yet because ufw.
@@ -67,7 +80,12 @@ systemctl start gflick
 # [install caddy v2 - they have a debian/ubunto repo]
 # Then:
 mkdir /etc/caddy/sites-enabled/
-cp /home/gflick/gflick/caddy/gflick /etc/caddy/sites-enabled/gflick
-# [ edit /etc/caddy/Caddyfile to simply say `import sites-enabled/*` ]
+cp /home/gflick/gflick/caddy/gflick.caddy /etc/caddy/sites-enabled/
+# [ edit /etc/caddy/Caddyfile to simply say `import sites-enabled/*.caddy` ]
 systemctl enable caddy
 systemctl start caddy
+```
+
+[1]: https://hi.imnhan.com/posts/towards-an-acceptable-video-playing-experience/
+[2]: https://hi.imnhan.com/posts/streaming-videos-from-google-drive-2nd-attempt/
+[3]: https://github.com/nhanb/gflick/releases/tag/0.1.3

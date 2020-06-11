@@ -8,8 +8,9 @@ Restart=on-abnormal
 User=gflick
 Group=gflick
 WorkingDirectory=/home/gflick/gflick
-# Needs -u so logs actually show up in journalctl:
-ExecStart=/usr/bin/python3.7 -u /home/gflick/gflick/server.py
+# Needs PYTHONUNBUFFERED so logs actually show up in journalctl:
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/bin/bash -c 'export PATH=$PATH:$HOME/.local/bin; gflick-prod'
 
 [Install]
 WantedBy=multi-user.target
