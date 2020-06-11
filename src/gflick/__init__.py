@@ -6,7 +6,13 @@ import subprocess
 
 def prod():
     subprocess.run(
-        ["gunicorn", "gflick.server:app", "--workers=5", "--bind=127.0.0.1:8000"]
+        [
+            "gunicorn",
+            "gflick.server:app",
+            "--timeout=14400",
+            "--workers=5",
+            "--bind=127.0.0.1:8000",
+        ]
     )
 
 
@@ -17,6 +23,7 @@ def dev():
         [
             "gunicorn",
             "gflick.server:app",
+            "--timeout=14400",
             "--workers=5",
             "--bind=127.0.0.1:8000",
             "--reload",
