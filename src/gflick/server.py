@@ -1,11 +1,20 @@
 import json
+import os
 import secrets
 import time
 from contextlib import closing
 from string import Template
 from urllib.parse import quote, unquote
 
-from bottle import HTTPError, HTTPResponse, hook, request, response, route, run
+from bottle import (
+    HTTPError,
+    HTTPResponse,
+    default_app,
+    hook,
+    request,
+    response,
+    route,
+)
 # Explicit names so I don't mistake between `requests` and bottle's `request`
 from requests import get as requests_get
 from requests import head as requests_head
@@ -16,14 +25,36 @@ from . import db
 PORT = 8000
 CHUNK_SIZE = 1024 * 1024 * 2  # 2MB in bytes
 
+# Minimum duration of inactivity before user token expires:
+USER_TOKEN_LIFETIME = 10 * 3600  # 10 hours
+
 with open("tokens.json", "r") as tfile:
     tokens = json.load(tfile)
-
 CLIENT_ID = tokens["client_id"]
 CLIENT_SECRET = tokens["client_secret"]
 REFRESH_TOKEN = tokens["refresh_token"]
 USER_PASSWORD = tokens["user_password"]
-USER_TOKEN = secrets.token_urlsafe(128)
+
+
+def get_user_token(DB_KEY="user_token"):
+    """
+    Read user_token from db.
+    Regenerate if it's unavailable or expired.
+    """
+    now = time.time()
+    token_data = json.loads(db.keyval_get(DB_KEY, "{}"))
+
+    # If token exists and hasn't expired, extend its expiration date and return
+    if token_data and token_data["expires_at"] > now:
+        token_data["expires_at"] = now + USER_TOKEN_LIFETIME
+        db.keyval_set(DB_KEY, json.dumps(token_data))
+        return token_data["token"]
+
+    # Otherwise, regenerate token!
+    token = secrets.token_urlsafe(128)
+    expires_at = now + USER_TOKEN_LIFETIME  # expires in 24 hours
+    db.keyval_set(DB_KEY, json.dumps({"token": token, "expires_at": expires_at}))
+    return token
 
 
 def get_access_token(clientId: str, clientSecret: str, refreshToken: str) -> str:
@@ -280,7 +311,7 @@ def view_login_post():
 
     # Password is correct!
     response = HTTPResponse(status=302, headers={"Location": "/"})
-    response.set_cookie("user_token", USER_TOKEN)
+    response.set_cookie("user_token", get_user_token())
     return response
 
 
@@ -294,17 +325,11 @@ def authenticate():
     """
     if request.path != "/login" and not request.path.startswith("/v/"):
         user_token = request.cookies.get("user_token")
-        if not user_token or user_token != USER_TOKEN:
+        if not user_token or user_token != get_user_token():
             response = HTTPResponse(status=302, headers={"Location": "/login"})
             response.delete_cookie("user_token")
             raise response
 
 
-def run_dev():
-    gunicorn_kwargs = {"workers": 5, "reload": True, "debug": True}
-    run(server="gunicorn", host="localhost", port=8000, **gunicorn_kwargs)
-
-
-def run_prod():
-    gunicorn_kwargs = {"workers": 5}
-    run(server="gunicorn", host="localhost", port=8000, **gunicorn_kwargs)
+app = default_app()
+app.config["debug"] = os.environ.get("GFLICK_DEBUG") == "1"

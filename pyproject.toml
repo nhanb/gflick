@@ -8,6 +8,7 @@ license = "MIT"
 [tool.poetry.scripts]
 gflick-prod = "gflick:prod"
 gflick-dev = "gflick:dev"
+gflick-raw = "gflick:raw"
 gflick-google = "gflick:google"
 
 [tool.poetry.dependencies]
