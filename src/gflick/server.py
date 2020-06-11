@@ -199,7 +199,7 @@ def view_video(file_slug, file_name):
     with closing(request_func(url, headers=req_headers, stream=True)) as vid_resp:
         gflick_resp_headers = {}
 
-        if vid_resp.status_code != 200:
+        if not 200 <= vid_resp.status_code <= 299:  # known cases: 200, 206
             return HTTPError(vid_resp.status_code, "FAILED")
         else:
             # VLC android won't allow seeking if accept-ranges isn't found (?)
