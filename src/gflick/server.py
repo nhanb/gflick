@@ -272,7 +272,7 @@ def view_drive(drive_id, folder_id=None):
     api_resp = requests_get(
         "https://www.googleapis.com/drive/v3/files",
         params={
-            "q": f"'{parent}' in parents",
+            "q": f"'{parent}' in parents and trashed = false",
             "fields": "files(id,name,mimeType,thumbnailLink)",
             "driveId": drive_id,
             "corpora": "drive",
