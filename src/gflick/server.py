@@ -128,8 +128,10 @@ def file_html(drive_id, data):
         filename = quote(data["name"])
         inner_text = data["name"]
         thumbnail_link = data.get("thumbnailLink")
+        """
         if thumbnail_link:
             inner_text = f'<img src="{thumbnail_link}" /><br/>{inner_text}'
+        """
         return f'<p><a href="/slug/{data["id"]}/{filename}">{inner_text}</a></p>'
 
 
@@ -269,23 +271,32 @@ def view_drive(drive_id, folder_id=None):
         return HTTPError(500, "FAILED")
 
     parent = folder_id or drive_id
-    api_resp = requests_get(
-        "https://www.googleapis.com/drive/v3/files",
-        params={
-            "q": f"'{parent}' in parents and trashed = false",
-            "fields": "files(id,name,mimeType,thumbnailLink)",
-            "driveId": drive_id,
-            "corpora": "drive",
-            "includeItemsFromAllDrives": True,
-            "supportsAllDrives": True,
-            "orderBy": "folder,name,createdTime desc",
-        },
-        headers={"Authorization": f"Bearer {token}"},
-    )
 
-    assert api_resp.status_code == 200, api_resp.text
+    files = []
+    page_token = ""
+    while True:
+        api_resp = requests_get(
+            "https://www.googleapis.com/drive/v3/files",
+            params={
+                "q": f"'{parent}' in parents and trashed = false",
+                "fields": "files(id,name,mimeType,thumbnailLink),nextPageToken",
+                "driveId": drive_id,
+                "corpora": "drive",
+                "includeItemsFromAllDrives": True,
+                "supportsAllDrives": True,
+                "orderBy": "folder,name,createdTime desc",
+                "pageToken": page_token,
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert api_resp.status_code == 200, api_resp.text
+        resp_json = api_resp.json()
+        files += resp_json["files"]
 
-    files = api_resp.json()["files"]
+        page_token = resp_json.get("nextPageToken", "")
+        if not page_token:
+            break
+
     files_html = "\n".join(file_html(drive_id, d) for d in files)
     html = page_html(title=parent, body=files_html)
     return html
