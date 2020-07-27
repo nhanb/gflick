@@ -128,10 +128,8 @@ def file_html(drive_id, data):
         filename = quote(data["name"])
         inner_text = data["name"]
         thumbnail_link = data.get("thumbnailLink")
-        """
         if thumbnail_link:
             inner_text = f'<img src="{thumbnail_link}" /><br/>{inner_text}'
-        """
         return f'<p><a href="/slug/{data["id"]}/{filename}">{inner_text}</a></p>'
 
 
